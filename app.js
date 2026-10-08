@@ -1,29 +1,34 @@
 (() => {
   "use strict";
+  const I = window.I18N;
+  const t = (k, v) => I.t(k, v);
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const r2 = (n) => Math.round(Number(n) * 100) / 100;
   const gbp = (n) => { const v = r2(n); return (v < 0 ? "-£" : "£") + (Number.isInteger(v) ? Math.abs(v).toString() : Math.abs(v).toFixed(2)); };
-  const fmtDate = (d) => { if (!d) return "fără termen"; try { return new Date(d + "T12:00:00").toLocaleDateString("ro-RO", { day: "numeric", month: "short" }); } catch { return d; } };
-  const fmtTime = (t) => { try { const d = new Date(t); const today = new Date().toDateString() === d.toDateString(); return d.toLocaleString("ro-RO", today ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
-  const toast = (msg) => { const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); };
+  const fmtDate = (d) => { if (!d) return t("noDeadline"); try { return new Date(d + "T12:00:00").toLocaleDateString(I.locale, { day: "numeric", month: "short" }); } catch { return d; } };
+  const fmtTime = (x) => { try { const d = new Date(x); const today = new Date().toDateString() === d.toDateString(); return d.toLocaleString(I.locale, today ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  const fmtStamp = (x) => { try { return new Date(x).toLocaleString(I.locale, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  const toast = (msg) => { const el = document.createElement("div"); el.className = "toast"; el.setAttribute("role", "status"); el.textContent = msg; document.body.appendChild(el); setTimeout(() => el.remove(), 2600); };
   const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
   const errText = (e) => {
     const m = (e && (e.message || e.error_description)) || "";
-    if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return "Nu e conexiune la internet. Încearcă din nou.";
-    if (/Invalid login credentials/i.test(m)) return "Email sau parolă greșite.";
-    if (/already registered|already been registered/i.test(m)) return "Există deja un cont cu acest email. Alege „Am cont”.";
-    if (/Password should be at least/i.test(m)) return "Parola trebuie să aibă minim 6 caractere.";
-    if (/valid email|invalid format|Unable to validate email/i.test(m)) return "Adresa de email nu pare corectă.";
-    if (/rate limit|too many/i.test(m)) return "Prea multe încercări. Așteaptă un minut.";
-    if (/Email not confirmed/i.test(m)) return "Contul nu e confirmat. Spune-i lui Lucian.";
-    if (/JWT|token/i.test(m)) return "Sesiunea a expirat. Intră din nou.";
-    return m || "N-a mers. Încearcă din nou.";
+    if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return t("err.network");
+    if (/Invalid login credentials/i.test(m)) return t("err.login");
+    if (/already registered|already been registered/i.test(m)) return t("err.exists");
+    if (/Password should be at least/i.test(m)) return t("err.passLen");
+    if (/valid email|invalid format|Unable to validate email/i.test(m)) return t("err.email");
+    if (/rate limit|too many/i.test(m)) return t("err.rate");
+    if (/Email not confirmed/i.test(m)) return t("err.unconfirmed");
+    if (/JWT|token/i.test(m)) return t("err.session");
+    return I.serverMsg(m) || t("err.generic");
   };
+
+  I.apply();
 
   const cfg = window.CHALLENGE_POT_CONFIG || {};
   if (!cfg.supabaseUrl || !cfg.supabaseKey || !window.supabase) {
-    $("loading").innerHTML = '<div class="hero"><h1>Challenge <em>Pot</em></h1></div><div class="empty"><strong>Aplicația nu e configurată</strong>Lipsesc datele de conectare la baza de date.</div>';
+    $("loading").innerHTML = `<div class="hero"><h1>Challenge <em>Pot</em></h1></div><div class="empty"><strong>${esc(t("err.notConfigured"))}</strong>${esc(t("err.notConfiguredSub"))}</div>`;
     return;
   }
   const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, {
@@ -32,12 +37,10 @@
 
   const S = {
     session: null, me: null,
-    groups: [],          // [{id,name,nick,is_admin}]
-    gid: null,           // current group id
-    members: {}, challenges: [], payments: [], proofs: {}, votes: {}, messages: [], offers: [], photoUrls: {},
+    groups: [], gid: null,
+    members: {}, challenges: [], payments: [], proofs: [], votes: {}, messages: [], offers: [], invites: [], photoUrls: {}, newInvite: new Set(), addInvite: new Set(),
     tab: "list", month: null, openId: null, kind: "duel", stake: 10, mode: "login", channel: null, loaded: false, busy: false
   };
-  const STATUS = { open: "Se strâng mizele", active: "În desfășurare", voting: "La vot", settled: "Închis", cancelled: "Anulat" };
   const curGroup = () => S.groups.find(g => g.id === S.gid) || null;
 
   // ---------- views ----------
@@ -46,33 +49,59 @@
     VIEWS.forEach(v => { $(v).hidden = v !== view; });
     const inGroup = ["tabList", "tabNew", "tabLedger"].includes(view);
     $("nav").hidden = !inGroup;
-    $("meBtn").hidden = !inGroup;
     $("grpBtn").hidden = !inGroup;
+    $("langTop").hidden = inGroup;
   }
   function go(tab) {
     S.tab = tab;
     show({ list: "tabList", new: "tabNew", ledger: "tabLedger" }[tab]);
     document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
+    if (tab === "new") renderTargets();
     window.scrollTo(0, 0);
   }
 
   // ---------- people ----------
-  const nameOf = (id) => id === S.me ? "Tu" : ((S.members[id] && S.members[id].nick) || "Fost membru");
+  const nickOf = (id) => (S.members[id] && S.members[id].nick) || t("nick.formerMember");
+  const nameOf = (id) => id === S.me ? t("you") : nickOf(id);
   const colorOf = (id) => { let h = 0; for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return `hsl(${h % 360} 45% 42%)`; };
   const face = (id, cls = "av sm") => {
     const n = (S.members[id] && S.members[id].nick) || "?";
     return `<span class="${cls}" style="background:${colorOf(id)}" aria-hidden="true">${esc(n.trim().charAt(0) || "?")}</span>`;
   };
 
+  // ---------- challenge roles ----------
+  const isSolo = (c) => c.kind === "personal" || c.kind === "dare";          // one person does it, others bet against
+  const doerOf = (c) => c.kind === "dare" ? c.target : c.creator;
+  const targetAccepted = (c) => c.kind === "dare" && (c.participants || []).includes(c.target);
+  function playersOf(c) {
+    if (c.kind === "duel") return c.participants || [];
+    if (c.kind === "dare") return [c.target, ...(c.backers || [])];
+    return [c.creator, ...(c.backers || [])];
+  }
+  const isPlayer = (c, id) => playersOf(c).includes(id);
+  function windowEnd(c) {
+    if (c.status !== "active" || !c.started_at) return null;
+    const start = new Date(c.started_at).getTime();
+    if (!c.deadline) return new Date(start + 24 * 3600e3);
+    const [y, m, d] = c.deadline.split("-").map(Number);
+    const end = Date.UTC(y, m - 1, d + 1);
+    return new Date(start + Math.max(0, end - start) * 0.1);
+  }
+  const canJoinNow = (c) => c.status === "open" || (c.status === "active" && windowEnd(c) && Date.now() <= windowEnd(c).getTime());
+  const pendingFor = (cid) => S.invites.filter(r => r.challenge_id === cid);
+  const potOf = (c) => isSolo(c) ? (c.backers || []).length * Number(c.stake) : (c.participants || []).length * Number(c.stake);
+
   // ---------- settlement math ----------
   function transfersFor(c) {
     const out = [];
     if (c.status !== "settled" || !c.result) return out;
     const stake = Number(c.stake) || 0;
-    if (c.kind === "personal") {
+    if (isSolo(c)) {
+      const doer = doerOf(c);
       for (const b of (c.backers || [])) {
-        if (c.result.success) out.push({ from: b, to: c.creator, amount: stake });
-        else out.push({ from: c.creator, to: b, amount: stake });
+        if (b === doer) continue;
+        if (c.result.success) out.push({ from: b, to: doer, amount: stake });
+        else out.push({ from: doer, to: b, amount: stake });
       }
     } else {
       const winners = c.result.winners || [];
@@ -85,14 +114,15 @@
   const pad = (n) => String(n).padStart(2, "0");
   const monthKey = (d) => { const x = d ? new Date(d) : new Date(); return x.getFullYear() + "-" + pad(x.getMonth() + 1); };
   const thisMonth = () => monthKey();
-  const monthLabel = (k) => { const [y, m] = k.split("-").map(Number); const t = new Date(y, m - 1, 15).toLocaleDateString("ro-RO", { month: "long", year: "numeric" }); return t.charAt(0).toUpperCase() + t.slice(1); };
-  const monthShort = (k) => { const [y, m] = k.split("-").map(Number); const t = new Date(y, m - 1, 15).toLocaleDateString("ro-RO", { month: "short" }).replace(".", ""); return (t.charAt(0).toUpperCase() + t.slice(1)) + (y !== new Date().getFullYear() ? " " + y : ""); };
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const monthLabel = (k) => { const [y, m] = k.split("-").map(Number); return cap(new Date(y, m - 1, 15).toLocaleDateString(I.locale, { month: "long", year: "numeric" })); };
+  const monthShort = (k) => { const [y, m] = k.split("-").map(Number); const s = new Date(y, m - 1, 15).toLocaleDateString(I.locale, { month: "short" }).replace(".", ""); return cap(s) + (y !== new Date().getFullYear() ? " " + y : ""); };
   const challengeMonth = (c) => c.settled_at ? monthKey(c.settled_at) : null;
   const paymentMonth = (p) => /^\d{4}-\d{2}/.test(String(p.period || "")) ? String(p.period).slice(0, 7) : monthKey(p.created_at);
   function balances(month) {
     const bal = {};
     const add = (id, v) => { bal[id] = (bal[id] || 0) + v; };
-    for (const c of S.challenges) { if (month && challengeMonth(c) !== month) continue; for (const t of transfersFor(c)) { add(t.from, -t.amount); add(t.to, t.amount); } }
+    for (const c of S.challenges) { if (month && challengeMonth(c) !== month) continue; for (const x of transfersFor(c)) { add(x.from, -x.amount); add(x.to, x.amount); } }
     for (const p of S.payments) { if (month && paymentMonth(p) !== month) continue; add(p.from_id, Number(p.amount)); add(p.to_id, -Number(p.amount)); }
     return bal;
   }
@@ -102,7 +132,6 @@
     S.payments.forEach(p => set.add(paymentMonth(p)));
     return [...set].sort().reverse();
   }
-  function allDebts() { return ledgerMonths().flatMap(k => simplify(balances(k)).map(d => ({ ...d, month: k }))); }
   function simplify(bal) {
     const debt = [], cred = [];
     for (const [id, v] of Object.entries(bal)) { const r = r2(v); if (r < 0) debt.push([id, -r]); else if (r > 0) cred.push([id, r]); }
@@ -116,6 +145,7 @@
     }
     return out;
   }
+  function allDebts() { return ledgerMonths().flatMap(k => simplify(balances(k)).map(d => ({ ...d, month: k }))); }
   window.__cpMath = { transfersFor, simplify, S };
 
   // ---------- data ----------
@@ -142,7 +172,7 @@
     const byId = {}; (groups.data || []).forEach(g => { byId[g.id] = g; });
     S.groups = (mine.data || []).filter(m => byId[m.group_id])
       .map(m => ({ id: m.group_id, name: byId[m.group_id].name, nick: m.nick, is_admin: m.is_admin }))
-      .sort((a, b) => a.name.localeCompare(b.name, "ro"));
+      .sort((a, b) => a.name.localeCompare(b.name, I.locale));
     if (!S.groups.some(g => g.id === S.gid)) {
       const saved = store.get("cp-group-" + S.me);
       S.gid = (S.groups.find(g => g.id === saved) || S.groups[0] || {}).id || null;
@@ -156,10 +186,11 @@
     if (seq !== loadSeq) return;
     if (!S.gid) { S.loaded = true; renderStart(); return; }
     const gid = S.gid;
-    const [m, c, p] = await Promise.all([
+    const [m, c, p, iv] = await Promise.all([
       sb.from("group_members").select("user_id,nick,is_admin").eq("group_id", gid),
       sb.from("challenges").select("*").eq("group_id", gid).order("created_at", { ascending: false }),
-      sb.from("payments").select("*").eq("group_id", gid).order("created_at", { ascending: false })
+      sb.from("payments").select("*").eq("group_id", gid).order("created_at", { ascending: false }),
+      sb.from("challenge_invites").select("*").eq("status", "pending").order("created_at", { ascending: true })
     ]);
     if (seq !== loadSeq || gid !== S.gid) return;
     const err = m.error || c.error || p.error;
@@ -167,6 +198,8 @@
     clearBanner();
     S.members = {}; (m.data || []).forEach(r => { S.members[r.user_id] = r; });
     S.challenges = c.data || []; S.payments = p.data || [];
+    const ids = new Set(S.challenges.map(x => x.id));
+    S.invites = (iv && !iv.error ? iv.data || [] : []).filter(r => ids.has(r.challenge_id));
     await signPhotos(S.challenges.map(x => x.photo_path));
     if (S.openId) await loadDetail(S.openId);
     S.loaded = true;
@@ -182,19 +215,19 @@
   }
   async function loadDetail(id) {
     const c = S.challenges.find(x => x.id === id);
-    const isPlayer = c ? playersOf(c).includes(S.me) : false;
+    const player = c ? isPlayer(c, S.me) : false;
     const [p, v, msg, off] = await Promise.all([
       sb.from("proofs").select("*").eq("challenge_id", id),
       sb.from("votes").select("*").eq("challenge_id", id),
-      isPlayer ? sb.from("challenge_messages").select("*").eq("challenge_id", id).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
+      player ? sb.from("challenge_messages").select("*").eq("challenge_id", id).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
       sb.from("challenge_offers").select("*").eq("challenge_id", id).order("created_at", { ascending: true })
     ]);
     if (S.openId !== id) return;
-    S.proofs = {}; (p.data || []).forEach(r => { S.proofs[r.user_id] = r; });
+    S.proofs = (p.data || []).slice().sort((a, b) => String(b.created_at || b.updated_at).localeCompare(String(a.created_at || a.updated_at)));
     S.votes = {}; (v.data || []).forEach(r => { S.votes[r.voter_id] = r; });
     S.messages = msg.data || [];
     S.offers = off.data || [];
-    await signPhotos(Object.values(S.proofs).map(r => r.photo_path));
+    await signPhotos(S.proofs.map(r => r.photo_path));
   }
 
   let reloadTimer = null;
@@ -202,15 +235,15 @@
   function subscribe() {
     if (S.channel) return;
     let ch = sb.channel("pot");
-    for (const t of ["groups", "group_members", "challenges", "proofs", "votes", "payments", "challenge_messages", "challenge_offers"]) {
-      ch = ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
+    for (const tb of ["groups", "group_members", "challenges", "proofs", "votes", "payments", "challenge_messages", "challenge_offers", "challenge_invites"]) {
+      ch = ch.on("postgres_changes", { event: "*", schema: "public", table: tb }, scheduleReload);
     }
     S.channel = ch.subscribe();
   }
   function unsubscribe() { if (S.channel) { sb.removeChannel(S.channel); S.channel = null; } }
   document.addEventListener("visibilitychange", () => { if (!document.hidden && S.me) scheduleReload(); });
   window.addEventListener("online", () => { if (S.me) scheduleReload(); });
-  window.addEventListener("offline", () => banner("Fără internet. Modificările nu se pot salva acum."));
+  window.addEventListener("offline", () => banner(t("offline")));
 
   let bannerEl = null;
   function banner(msg) { if (!bannerEl) { bannerEl = document.createElement("div"); bannerEl.className = "banner"; bannerEl.setAttribute("role", "alert"); document.body.appendChild(bannerEl); } bannerEl.textContent = msg; }
@@ -225,19 +258,15 @@
   }
   function groupListHtml() {
     return S.groups.map(g => `<button class="grow" data-switch="${esc(g.id)}">
-      <span class="nm">${esc(g.name)}<span class="sub">tu ești ${esc(g.nick)}${g.is_admin ? " · administrator" : ""}</span></span>
-      ${g.id === S.gid ? '<span class="tick" aria-label="grupul curent">✓</span>' : ""}</button>`).join("");
-  }
-  function renderGroupsSheet() {
-    $("groupList").innerHTML = groupListHtml();
-    if (!$("groupForms").children.length) $("groupForms").innerHTML = groupFormsHtml();
+      <span class="nm">${esc(g.name)}<span class="sub">${esc(t("groups.youAre", { nick: g.nick }))}${g.is_admin ? esc(t("groups.admin")) : ""}</span></span>
+      ${g.id === S.gid ? `<span class="tick" aria-label="${esc(t("groups.current"))}">✓</span>` : ""}</button>`).join("");
   }
   async function switchGroup(id) {
     if (id === S.gid) { closeSheets(); return; }
     S.gid = id; store.set("cp-group-" + S.me, id);
     S.members = {}; S.challenges = []; S.payments = []; S.openId = null; S.month = null;
     closeSheets(); go("list");
-    $("listBody").innerHTML = `<p class="muted" style="margin-top:20px">Se încarcă…</p>`;
+    $("listBody").innerHTML = `<p class="muted" style="margin-top:20px">${esc(t("loading"))}</p>`;
     renderTop();
     await loadAll();
   }
@@ -245,9 +274,9 @@
     const msg = form.querySelector(".formmsg"); msg.textContent = "";
     const btn = form.querySelector("button[type=submit]");
     const f = Object.fromEntries(new FormData(form).entries());
-    if (form.dataset.form === "join" && !String(f.code || "").trim()) { msg.textContent = "Scrie codul de invitație."; return; }
-    if (form.dataset.form === "create" && !String(f.name || "").trim()) { msg.textContent = "Scrie numele grupului."; return; }
-    if (!String(f.nick || "").trim()) { msg.textContent = "Scrie cum te cheamă în grup."; return; }
+    if (form.dataset.form === "join" && !String(f.code || "").trim()) { msg.textContent = t("start.needCode"); return; }
+    if (form.dataset.form === "create" && !String(f.name || "").trim()) { msg.textContent = t("start.needName"); return; }
+    if (!String(f.nick || "").trim()) { msg.textContent = t("start.needNick"); return; }
     btn.disabled = true;
     const { data, error } = form.dataset.form === "join"
       ? await sb.rpc("join_group", { p_code: f.code, p_nick: f.nick })
@@ -255,9 +284,9 @@
     btn.disabled = false;
     if (error) { msg.textContent = errText(error); return; }
     form.reset();
-    toast(form.dataset.form === "join" ? "Ai intrat în grup" : "Grup creat. Invită-ți prietenii cu codul.");
+    toast(form.dataset.form === "join" ? t("toast.joinedGroup") : t("toast.groupCreated"));
     S.gid = data; store.set("cp-group-" + S.me, data);
-    S.members = {}; S.challenges = []; S.payments = [];
+    S.members = {}; S.challenges = []; S.payments = []; S.month = null;
     closeSheets(); subscribe();
     await loadAll();
     go("list");
@@ -265,18 +294,22 @@
   }
 
   // ---------- render: list ----------
-  function playersOf(c) { return c.kind === "personal" ? [c.creator, ...(c.backers || [])] : (c.participants || []); }
-  function potOf(c) { return c.kind === "personal" ? (c.backers || []).length * Number(c.stake) : (c.participants || []).length * Number(c.stake); }
+  function kindLine(c) {
+    if (c.kind === "personal") return t("slip.personal", { name: nameOf(c.creator) });
+    if (c.kind === "dare") return c.creator === S.me ? t("slip.dareMe", { target: nameOf(c.target) }) : c.target === S.me ? t("slip.dareYou", { name: nameOf(c.creator) }) : t("slip.dare", { name: nameOf(c.creator), target: nameOf(c.target) });
+    return t("slip.duel");
+  }
   function slipHtml(c) {
     const people = playersOf(c);
     const thumb = c.photo_path && S.photoUrls[c.photo_path] ? `<img class="slip-thumb" src="${esc(S.photoUrls[c.photo_path])}" alt="" loading="lazy">` : "";
+    const n = people.length;
     return `<button class="slip" data-open="${esc(c.id)}">
       <div class="slip-main">
-        <div class="slip-meta"><span class="pill ${esc(c.status)}">${esc(STATUS[c.status] || c.status)}</span><span>${c.kind === "personal" ? "Personală · " + esc(nameOf(c.creator)) : "Unul contra altuia"}</span></div>
+        <div class="slip-meta"><span class="pill ${esc(c.status)}">${esc(t("status." + c.status))}</span><span>${esc(kindLine(c))}</span></div>
         <div class="slip-head">${thumb}<div><div class="slip-title">${esc(c.title)}</div>
-        <div class="slip-meta"><span class="faces">${people.slice(0, 6).map(id => face(id)).join("")}</span><span>${people.length} ${people.length === 1 ? "jucător" : "jucători"} · ${c.deadline ? "până pe " + esc(fmtDate(c.deadline)) : "fără termen"}</span></div></div></div>
+        <div class="slip-meta"><span class="faces">${people.slice(0, 6).map(id => face(id)).join("")}</span><span>${esc(t(n === 1 ? "slip.players1" : "slip.playersN", { n }))} · ${esc(c.deadline ? t("slip.until", { date: fmtDate(c.deadline) }) : t("noDeadline"))}</span></div></div></div>
       </div>
-      <div class="slip-stake"><span class="lbl">miză</span><span class="amt">${esc(gbp(c.stake))}</span><span class="lbl">${c.kind === "personal" ? "în joc" : "pot"} ${esc(gbp(potOf(c)))}</span></div>
+      <div class="slip-stake"><span class="lbl">${esc(t("slip.stake"))}</span><span class="amt">${esc(gbp(c.stake))}</span><span class="lbl">${esc(t(isSolo(c) ? "slip.atStake" : "slip.pot"))} ${esc(gbp(potOf(c)))}</span></div>
     </button>`;
   }
   function renderList() {
@@ -285,154 +318,225 @@
     const debts = allDebts();
     const owe = debts.filter(d => d.from === S.me).reduce((s, d) => s + d.amount, 0);
     const due = debts.filter(d => d.to === S.me).reduce((s, d) => s + d.amount, 0);
+    const amt = (v) => `<span class="amt">${esc(gbp(v))}</span>`;
     let h = "";
-    if (owe > 0 || due > 0) h += `<div class="debt" style="margin-top:14px"><div class="who">${owe > 0 ? `Ai de dat <span class="amt">${esc(gbp(owe))}</span>` : ""}${due > 0 ? `Ai de primit <span class="amt">${esc(gbp(due))}</span>` : ""}</div><button class="btn sm ghost" data-tab="ledger">Socoteala</button></div>`;
-    h += `<h2>Active</h2>`;
+    if (owe > 0 || due > 0) h += `<div class="debt" style="margin-top:14px"><div class="who">${owe > 0 ? esc(t("list.owe", { amt: "§" })).replace("§", amt(owe)) : ""}${due > 0 ? esc(t("list.due", { amt: "§" })).replace("§", amt(due)) : ""}</div><button class="btn sm ghost" data-tab="ledger">${esc(t("list.ledger"))}</button></div>`;
+    const forYou = [];
+    S.challenges.forEach(c => {
+      if (!["open", "active"].includes(c.status)) return;
+      const myInv = S.invites.find(r => r.challenge_id === c.id && r.user_id === S.me && r.kind === "invite");
+      const reqs = c.creator === S.me ? S.invites.filter(r => r.challenge_id === c.id && r.kind === "request").length : 0;
+      let why = "";
+      if (c.kind === "dare" && c.target === S.me && c.status === "open" && !targetAccepted(c)) why = t("list.dared", { name: nameOf(c.creator) });
+      else if (myInv) why = t("list.invited", { name: nameOf(myInv.created_by) });
+      else if (reqs) why = t(reqs === 1 ? "list.req1" : "list.reqN", { n: reqs });
+      if (why) forYou.push([c, why]);
+    });
+    if (forYou.length) h += `<h2>${esc(t("list.forYou"))}</h2><div class="stack">${forYou.map(([c, why]) => `<div class="foryou"><span class="pill open">${esc(why)}</span>${slipHtml(c)}</div>`).join("")}</div>`;
+    h += `<h2>${esc(t("list.active"))}</h2>`;
     h += live.length ? `<div class="stack">${live.map(slipHtml).join("")}</div>`
-      : `<div class="empty"><strong>Niciun challenge activ</strong>Apasă „+ Nou” și lansează prima provocare. Prietenii intră cu miza lor.</div>`;
-    if (done.length) h += `<h2>Încheiate</h2><div class="stack">${done.map(slipHtml).join("")}</div>`;
-    if (Object.keys(S.members).length < 2) h += `<p class="note" style="margin-top:16px">Ești singur în grup deocamdată. Apasă pe numele tău, sus, ca să vezi codul de invitație.</p>`;
+      : `<div class="empty"><strong>${esc(t("list.emptyT"))}</strong>${esc(t("list.emptyS"))}</div>`;
+    if (done.length) h += `<h2>${esc(t("list.closed"))}</h2><div class="stack">${done.map(slipHtml).join("")}</div>`;
+    if (Object.keys(S.members).length < 2) h += `<p class="note" style="margin-top:16px">${esc(t("list.alone"))}</p>`;
     $("listBody").innerHTML = h;
   }
 
-  // ---------- render: ledger ----------
+  // ---------- render: ledger (per month) ----------
   function renderLedger() {
     const months = ledgerMonths();
     if (!S.month || !months.includes(S.month)) S.month = thisMonth();
-    const M = S.month, cur = thisMonth();
-    const bal = balances(M);
-    const debts = simplify(bal);
+    const M = S.month, cur = thisMonth(), ML = monthLabel(M);
+    const debts = simplify(balances(M));
     S._debts = debts;
     let h = "";
-    // unpaid from earlier months
     const old = months.filter(k => k < cur).map(k => ({ k, d: simplify(balances(k)) })).filter(x => x.d.length);
-    if (old.length) h += `<div class="result bad" style="margin-top:14px"><b>Neachitat din lunile trecute</b>${old.map(x => `<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:0">${esc(monthLabel(x.k))}: ${x.d.map(d => `${esc(nameOf(d.from))} → ${esc(nameOf(d.to))} <span class="mono">${esc(gbp(d.amount))}</span>`).join(", ")}</span><button class="btn sm ghost" data-month="${esc(x.k)}">Vezi luna</button></div>`).join("")}</div>`;
-    h += `<div class="chips" style="margin-top:14px" role="group" aria-label="Luna">${months.map(k => `<button type="button" data-month="${esc(k)}" aria-pressed="${k === M}">${esc(k === cur ? "Luna asta" : monthShort(k))}</button>`).join("")}</div>`;
-    h += `<h2>Cine cui datorează · ${esc(monthLabel(M))}</h2>`;
+    if (old.length) h += `<div class="result bad" style="margin-top:14px"><b>${esc(t("ledger.oldUnpaid"))}</b>${old.map(x => `<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:0">${esc(monthLabel(x.k))}: ${x.d.map(d => `${esc(nameOf(d.from))} → ${esc(nameOf(d.to))} <span class="mono">${esc(gbp(d.amount))}</span>`).join(", ")}</span><button class="btn sm ghost" data-month="${esc(x.k)}">${esc(t("ledger.seeMonth"))}</button></div>`).join("")}</div>`;
+    h += `<div class="chips" style="margin-top:14px" role="group">${months.map(k => `<button type="button" data-month="${esc(k)}" aria-pressed="${k === M}">${esc(k === cur ? t("month.this") : monthShort(k))}</button>`).join("")}</div>`;
+    h += `<h2>${esc(t("ledger.whoOwes", { month: ML }))}</h2>`;
     h += debts.length ? `<div class="stack">${debts.map((d, i) => `
       <div class="debt"><div class="who">${face(d.from)}<b>${esc(nameOf(d.from))}</b><span class="muted">→</span>${face(d.to)}<b>${esc(nameOf(d.to))}</b></div>
       <span class="amt">${esc(gbp(d.amount))}</span>
-      ${(d.from === S.me || d.to === S.me) ? `<button class="btn sm" data-paid="${i}">Marchează plătit</button>` : ""}
+      ${(d.from === S.me || d.to === S.me) ? `<button class="btn sm" data-paid="${i}">${esc(t("ledger.markPaid"))}</button>` : ""}
       </div>`).join("")}</div>
-      <p class="note">${M === cur ? "Se plătește la final de lună. Suma se actualizează la fiecare challenge închis luna asta." : "Banii pentru " + esc(monthLabel(M).toLowerCase()) + " se dau direct, prin transfer, apoi se bifează „Marchează plătit”."}</p>`
-      : `<div class="empty"><strong>${M === cur ? "Nimic de plătit luna asta, deocamdată" : "Luna e achitată"}</strong>${M === cur ? "Când se închide un challenge, aici apare cine cui are de dat la final de lună, deja compensat între voi." : "Toată lumea e la zi pentru " + esc(monthLabel(M)) + "."}</div>`;
+      <p class="note">${esc(M === cur ? t("ledger.noteNow") : t("ledger.noteOld", { month: ML }))}</p>`
+      : `<div class="empty"><strong>${esc(M === cur ? t("ledger.emptyNowT") : t("ledger.emptyOldT"))}</strong>${esc(M === cur ? t("ledger.emptyNowS") : t("ledger.emptyOldS", { month: ML }))}</div>`;
     const ids = Object.keys(S.members);
     const won = {};
-    S.challenges.forEach(c => { if (challengeMonth(c) !== M) return; transfersFor(c).forEach(t => { won[t.from] = (won[t.from] || 0) - t.amount; won[t.to] = (won[t.to] || 0) + t.amount; }); });
+    S.challenges.forEach(c => { if (challengeMonth(c) !== M) return; transfersFor(c).forEach(x => { won[x.from] = (won[x.from] || 0) - x.amount; won[x.to] = (won[x.to] || 0) + x.amount; }); });
     ids.sort((a, b) => (won[b] || 0) - (won[a] || 0));
     if (ids.length) {
-      h += `<h2>Clasament · ${esc(monthLabel(M))}</h2><div class="card">${ids.map(id => { const v = r2(won[id] || 0); return `<div class="bal">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="v ${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${esc(gbp(v))}</span></div>`; }).join("")}</div>
-      <p class="note">Cât a câștigat sau a pierdut fiecare din challenge-urile închise în ${esc(monthLabel(M).toLowerCase())}. Fiecare lună începe de la £0.</p>`;
+      h += `<h2>${esc(t("ledger.rank", { month: ML }))}</h2><div class="card">${ids.map(id => { const v = r2(won[id] || 0); return `<div class="bal">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="v ${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${esc(gbp(v))}</span></div>`; }).join("")}</div>
+      <p class="note">${esc(t("ledger.rankNote", { month: ML }))}</p>`;
     }
     const pays = S.payments.filter(p => paymentMonth(p) === M).slice(0, 30);
-    if (pays.length) h += `<h2>Plăți bifate · ${esc(monthLabel(M))}</h2><div class="card">${pays.map(p => `<div class="bal"><span class="nm">${esc(nameOf(p.from_id))} → ${esc(nameOf(p.to_id))} <span class="muted">· ${esc(new Date(p.created_at).toLocaleDateString("ro-RO", { day: "numeric", month: "short" }))}</span></span><span class="v">${esc(gbp(p.amount))}</span>${p.created_by === S.me ? `<button class="linkbtn" data-unpay="${esc(p.id)}">anulează</button>` : ""}</div>`).join("")}</div>`;
-    h += `<p class="note" style="margin-top:16px">Datoriile sunt compensate automat între toți din grup: dacă Ana îi datorează lui Mihai £10 și Mihai Anei £4, apare doar £6. Aplicația doar ține evidența; banii se trimit direct.</p>`;
+    if (pays.length) h += `<h2>${esc(t("ledger.paid", { month: ML }))}</h2><div class="card">${pays.map(p => `<div class="bal"><span class="nm">${esc(nameOf(p.from_id))} → ${esc(nameOf(p.to_id))} <span class="muted">· ${esc(new Date(p.created_at).toLocaleDateString(I.locale, { day: "numeric", month: "short" }))}</span></span><span class="v">${esc(gbp(p.amount))}</span>${p.created_by === S.me ? `<button class="linkbtn" data-unpay="${esc(p.id)}">${esc(t("ledger.undo"))}</button>` : ""}</div>`).join("")}</div>`;
+    h += `<p class="note" style="margin-top:16px">${esc(t("ledger.netting"))}</p>`;
     $("ledgerBody").innerHTML = h;
   }
 
   // ---------- render: detail ----------
-  const eligibleVoters = (c) => { const ids = Object.keys(S.members); return c.kind === "personal" ? ids.filter(i => i !== c.creator) : ids; };
+  const eligibleVoters = (c) => { const ids = Object.keys(S.members); return isSolo(c) ? ids.filter(i => i !== doerOf(c)) : ids; };
   const votesNeeded = (c) => Math.max(1, Math.ceil(eligibleVoters(c).length / 2));
-  const tally = () => { const t = {}; for (const v of Object.values(S.votes)) t[v.pick] = (t[v.pick] || 0) + 1; return t; };
+  const tally = () => { const r = {}; for (const v of Object.values(S.votes)) r[v.pick] = (r[v.pick] || 0) + 1; return r; };
 
   async function openDetail(id) {
-    S.openId = id; S.proofs = {}; S.votes = {}; S.messages = []; S.offers = [];
+    S.openId = id; S.proofs = []; S.votes = {}; S.messages = []; S.offers = [];
     $("pText").value = ""; $("pPhoto").value = ""; $("chatInput").value = "";
-    $("offerForm").hidden = true; $("oMsg").textContent = "";
+    $("offerForm").hidden = true; $("oMsg").textContent = ""; $("inviteForm").hidden = true; S.addInvite = new Set();
     $("detail").hidden = false; $("detail").scrollTop = 0;
     renderDetail();
     try { await loadDetail(id); } catch {}
     renderDetail(true);
   }
-  function closeSheets() { S.openId = null; $("detail").hidden = true; $("account").hidden = true; $("groupsSheet").hidden = true; }
+  function closeSheets() { S.openId = null; $("detail").hidden = true; $("account").hidden = true; }
 
   function renderChat(c, scroll) {
-    const isPlayer = playersOf(c).includes(S.me);
-    const open = c.status !== "cancelled";
-    $("chatBox").hidden = !isPlayer;
-    $("chatLocked").hidden = isPlayer;
-    if (!isPlayer) return;
+    const player = isPlayer(c, S.me);
+    $("chatBox").hidden = !player;
+    $("chatLocked").hidden = player;
+    if (!player) return;
     const list = $("chatList");
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     list.innerHTML = S.messages.length ? S.messages.map(m => `<div class="msg ${m.user_id === S.me ? "mine" : ""}">
         <span class="who">${m.user_id === S.me ? "" : `<b>${esc(nameOf(m.user_id))}</b>`}<span>${esc(fmtTime(m.created_at))}</span></span>
         <span class="bubble">${esc(m.body)}</span></div>`).join("")
-      : `<div class="chat-empty">Niciun mesaj încă. Scrie primul.</div>`;
+      : `<div class="chat-empty">${esc(t("chat.empty"))}</div>`;
     if (scroll || atBottom) list.scrollTop = list.scrollHeight;
-    $("chatForm").hidden = !open;
+    $("chatForm").hidden = c.status === "cancelled";
   }
 
   function renderDetail(scrollChat) {
     if (!S.openId) return;
     const c = S.challenges.find(x => x.id === S.openId);
-    if (!c) { $("detailBody").innerHTML = `<div class="empty" style="margin-top:12px"><strong>Challenge-ul nu mai există</strong></div>`; $("detailActions").innerHTML = ""; $("proofForm").hidden = true; $("chatBox").hidden = true; $("chatLocked").hidden = true; $("offerBox").hidden = true; return; }
-    const isP = c.kind === "personal";
+    if (!c) { $("detailBody").innerHTML = `<div class="empty" style="margin-top:12px"><strong>${esc(t("d.goneT"))}</strong></div>`; $("detailActions").innerHTML = ""; $("proofForm").hidden = true; $("chatBox").hidden = true; $("chatLocked").hidden = true; $("offerBox").hidden = true; return; }
+    const solo = isSolo(c), dare = c.kind === "dare";
+    const doer = doerOf(c);
     const players = playersOf(c);
     const inIt = players.includes(S.me);
-    let h = `<span class="pill ${esc(c.status)}">${esc(STATUS[c.status])}</span>
+    const typeText = c.kind === "personal" ? (c.creator === S.me ? t("d.typePersonalMe") : t("d.typePersonal", { name: nameOf(c.creator) }))
+      : dare ? (c.creator === S.me ? t("d.typeDareMe", { target: nameOf(c.target) }) : c.target === S.me ? t("d.typeDareYou", { name: nameOf(c.creator) }) : t("d.typeDare", { name: nameOf(c.creator), target: nameOf(c.target) }))
+      : t("d.typeDuel");
+    const acc = S.offers.filter(o => o.status === "accepted").pop();
+    let h = `<span class="pill ${esc(c.status)}">${esc(t("status." + c.status))}</span>
       <h1 class="d-title">${esc(c.title)}</h1>
-      ${c.photo_path && S.photoUrls[c.photo_path] ? `<a href="${esc(S.photoUrls[c.photo_path])}" target="_blank" rel="noopener"><img class="cover" src="${esc(S.photoUrls[c.photo_path])}" alt="Poza challenge-ului"></a>` : ""}
+      ${c.photo_path && S.photoUrls[c.photo_path] ? `<a href="${esc(S.photoUrls[c.photo_path])}" target="_blank" rel="noopener"><img class="cover" src="${esc(S.photoUrls[c.photo_path])}" alt="${esc(t("d.coverAlt"))}"></a>` : ""}
       ${c.descr ? `<p style="margin:0 0 12px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(c.descr)}</p>` : ""}
-      ${(() => { const acc = S.offers.filter(o => o.status === "accepted").pop(); return acc ? `<p class="note" style="margin:0 0 12px">Termeni schimbați după contra-oferta lui ${esc(nameOf(acc.proposer))}.${c.status === "open" ? " Cine intrase înainte trebuie să intre din nou." : ""}</p>` : ""; })()}
+      ${acc ? `<p class="note" style="margin:0 0 12px">${esc(t("d.termsChanged", { name: nameOf(acc.proposer) }))}${c.status === "open" ? esc(t("d.rejoin")) : ""}</p>` : ""}
       <div class="card"><dl class="kv">
-        <dt>Tip</dt><dd>${isP ? `Personală: ${esc(nameOf(c.creator))} încearcă, ceilalți pariază contra` : "Unul contra altuia, câștigătorul ia potul"}</dd>
-        <dt>Miză</dt><dd class="mono">${esc(gbp(c.stake))} de persoană</dd>
-        <dt>${isP ? "În joc" : "Pot"}</dt><dd class="mono">${esc(gbp(potOf(c)))}${isP ? ` (${esc(gbp(c.stake))} × ${(c.backers || []).length})` : ""}</dd>
-        <dt>Termen</dt><dd>${esc(fmtDate(c.deadline))}</dd>
-        <dt>Lansat de</dt><dd>${esc(nameOf(c.creator))}</dd>
+        <dt>${esc(t("d.type"))}</dt><dd>${esc(typeText)}</dd>
+        <dt>${esc(t("d.stake"))}</dt><dd class="mono">${esc(t("d.perPerson", { amt: gbp(c.stake) }))}</dd>
+        <dt>${esc(t(solo ? "d.atStake" : "d.pot"))}</dt><dd class="mono">${esc(gbp(potOf(c)))}${solo ? ` (${esc(gbp(c.stake))} × ${(c.backers || []).length})` : ""}</dd>
+        <dt>${esc(t("d.deadline"))}</dt><dd>${esc(fmtDate(c.deadline))}</dd>
+        <dt>${esc(t("d.by"))}</dt><dd>${esc(nameOf(c.creator))}</dd>
       </dl></div>`;
 
-    h += `<h2>${isP ? "Jucători" : "Participanți"}</h2><div class="card">${players.map(id => `<div class="person">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="muted" style="font-size:12.5px">${isP ? (id === c.creator ? "încearcă" : "pariază contra") : ""}${S.proofs[id] ? (isP ? " · " : "") + "dovadă trimisă" : ""}</span></div>`).join("") || `<p class="muted" style="margin:0">Nimeni încă.</p>`}</div>`;
+    const roleOf = (id) => {
+      if (!solo) return "";
+      if (id === doer) return dare ? `${t("d.challenged")} · ${targetAccepted(c) ? t("d.accepted") : t("d.notAnswered")}` : t("d.tries");
+      return t("d.betsAgainst");
+    };
+    h += `<h2>${esc(t(solo ? "d.players" : "d.participants"))}</h2><div class="card">${players.map(id => `<div class="person">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="muted" style="font-size:12.5px">${esc(roleOf(id))}${(() => { const n = S.proofs.filter(p => p.user_id === id).length; return n ? esc((solo || dare ? " · " : "") + t(n === 1 ? "d.proofs1" : "d.proofsN", { n })) : ""; })()}</span></div>`).join("") || `<p class="muted" style="margin:0">${esc(t("d.nobody"))}</p>`}</div>`;
 
-    const proofs = Object.entries(S.proofs);
-    if (proofs.length) h += `<h2>Dovezi</h2><div class="card">${proofs.map(([id, p]) => `<div class="proof"><div style="display:flex;gap:8px;align-items:center">${face(id)}<b>${esc(nameOf(id))}</b></div>${p.photo_path && S.photoUrls[p.photo_path] ? `<a href="${esc(S.photoUrls[p.photo_path])}" target="_blank" rel="noopener"><img src="${esc(S.photoUrls[p.photo_path])}" alt="Dovada lui ${esc(nameOf(id))}" loading="lazy"></a>` : ""}${p.body ? `<p>${esc(p.body)}</p>` : ""}</div>`).join("")}</div>`;
+    if (S.proofs.length) h += `<h2>${esc(t("d.proofs"))} · ${S.proofs.length}</h2><div class="card">${S.proofs.map(p => { const id = p.user_id; return `<div class="proof"><div class="proof-head">${face(id)}<b>${esc(nameOf(id))}</b><time class="stamp" datetime="${esc(p.created_at || p.updated_at)}">${esc(fmtStamp(p.created_at || p.updated_at))}</time></div>${p.photo_path && S.photoUrls[p.photo_path] ? `<a href="${esc(S.photoUrls[p.photo_path])}" target="_blank" rel="noopener"><img src="${esc(S.photoUrls[p.photo_path])}" alt="${esc(t("d.proofAlt", { name: nameOf(id) }))}" loading="lazy"></a>` : ""}${p.body ? `<p>${esc(p.body)}</p>` : ""}</div>`; }).join("")}</div>`;
 
     if (c.status === "voting") {
-      const t = tally(), my = S.votes[S.me] && S.votes[S.me].pick;
+      const tl = tally(), my = S.votes[S.me] && S.votes[S.me].pick;
       const canVote = eligibleVoters(c).includes(S.me);
-      const options = isP ? [["success", `${nameOf(c.creator)} a reușit`], ["fail", "N-a reușit"]]
+      const options = solo ? [["success", t("d.voteSuccess", { name: nameOf(doer) })], ["fail", t("d.voteFail")]]
         : players.filter(p => p !== S.me).map(p => [p, nameOf(p)]);
       const cast = Object.keys(S.votes).length, need = votesNeeded(c);
-      h += `<h2>Vot · ${cast} din ${eligibleVoters(c).length}</h2>
-        <div class="stack">${options.map(([k, label]) => `<button class="vote" data-vote="${esc(k)}" aria-pressed="${my === k}" ${canVote ? "" : "disabled"}>${!isP ? face(k) : ""}<span class="nm">${esc(label)}</span><span class="cnt">${t[k] || 0}</span></button>`).join("")}</div>
-        <p class="note">${isP ? `Votează tot grupul în afară de ${esc(nameOf(c.creator))}.` : "Votează tot grupul; nu poți vota pentru tine."} Votul se poate închide după ${need} ${need === 1 ? "vot" : "voturi"}. Îți poți schimba votul până atunci.</p>`;
+      h += `<h2>${esc(t("d.vote", { cast, total: eligibleVoters(c).length }))}</h2>
+        <div class="stack">${options.map(([k, label]) => `<button class="vote" data-vote="${esc(k)}" aria-pressed="${my === k}" ${canVote ? "" : "disabled"}>${!solo ? face(k) : ""}<span class="nm">${esc(label)}</span><span class="cnt">${tl[k] || 0}</span></button>`).join("")}</div>
+        <p class="note">${esc(solo ? t("d.voteNotePersonal", { name: nameOf(doer) }) : t("d.voteNoteDuel"))}${esc(t(need === 1 ? "d.voteClose1" : "d.voteCloseN", { n: need }))}</p>`;
     }
     if (c.status === "settled") {
       const tr = transfersFor(c);
-      const head = isP ? (c.result.success ? `${nameOf(c.creator)} a reușit` : `${nameOf(c.creator)} n-a reușit`)
-        : ((c.result.winners || []).length > 1 ? `Egalitate: ${(c.result.winners || []).map(nameOf).join(", ")}` : `Câștigă: ${(c.result.winners || []).map(nameOf).join(", ")}`);
-      h += `<h2>Rezultat</h2><div class="result ${isP && !c.result.success ? "bad" : ""}"><b style="font-size:17px">${esc(head)}</b>
-        <div style="margin-top:8px;font-size:14px">${tr.map(x => `${esc(nameOf(x.from))} → ${esc(nameOf(x.to))} <span class="mono">${esc(gbp(x.amount))}</span>`).join("<br>") || "Nimeni nu are nimic de dat."}</div></div>
-        <p class="note">Sumele au intrat în Socoteala pe ${esc(monthLabel(challengeMonth(c) || thisMonth()).toLowerCase())}.</p>`;
+      const winners = (c.result.winners || []).map(nameOf).join(", ");
+      const head = solo ? (doer === S.me ? t(c.result.success ? "d.didItMe" : "d.didntMe") : t(c.result.success ? "d.didIt" : "d.didnt", { name: nameOf(doer) }))
+        : t((c.result.winners || []).length > 1 ? "d.tie" : "d.wins", { names: winners });
+      h += `<h2>${esc(t("d.result"))}</h2><div class="result ${solo && !c.result.success ? "bad" : ""}"><b style="font-size:17px">${esc(head)}</b>
+        <div style="margin-top:8px;font-size:14px">${tr.map(x => `${esc(nameOf(x.from))} → ${esc(nameOf(x.to))} <span class="mono">${esc(gbp(x.amount))}</span>`).join("<br>") || esc(t("d.nobodyPays"))}</div></div>
+        <p class="note">${esc(t("d.inLedger", { month: monthLabel(challengeMonth(c) || thisMonth()) }))}</p>`;
     }
-    if (c.status === "cancelled") h += `<div class="empty" style="margin-top:12px"><strong>Anulat</strong>Nimeni nu datorează nimic.</div>`;
+    if (c.status === "cancelled") h += `<div class="empty" style="margin-top:12px"><strong>${esc(t("d.cancelledT"))}</strong>${esc(t("d.cancelledS"))}</div>`;
     $("detailBody").innerHTML = h;
 
-    const canProof = c.status === "active" && (isP ? S.me === c.creator : inIt);
+    const canProof = c.status === "active" && (solo ? S.me === doer : inIt);
     $("proofForm").hidden = !canProof;
-    $("pSend").textContent = S.proofs[S.me] ? "Actualizează dovada" : "Trimite dovada";
+    $("pSend").textContent = t("proof.send");
 
     const a = [];
     if (c.status === "open") {
-      if (!inIt) a.push(`<button class="btn block" data-act="join">${isP ? "Pariez contra" : "Intru"} cu ${esc(gbp(c.stake))}</button>`);
-      else if (S.me !== c.creator) a.push(`<button class="btn ghost block" data-act="leave">Ies din challenge</button>`);
-      if (S.me === c.creator) {
-        const enough = isP ? (c.backers || []).length >= 1 : players.length >= 2;
-        a.push(`<button class="btn block" data-act="start" ${enough ? "" : "disabled"}>Pornește challenge-ul</button>`);
-        if (!enough) a.push(`<p class="note" style="margin:0">${isP ? "Aștepți cel puțin un prieten care pariază contra." : "Aștepți cel puțin încă un participant."}</p>`);
-        a.push(`<button class="btn warn block" data-act="cancel">Anulează challenge-ul</button>`);
+      if (dare && S.me === c.target) {
+        if (!targetAccepted(c)) {
+          a.push(`<p class="note" style="margin:0">${esc(t("d.dareYou", { name: nameOf(c.creator) }))}</p>`);
+          a.push(`<button class="btn block" data-act="join">${esc(t("d.acceptDare"))}</button>`);
+        } else {
+          a.push(`<p class="note" style="margin:0">${esc(t("d.creatorStarts", { name: nameOf(c.creator) }))}</p>`);
+        }
+        a.push(`<button class="btn warn block" data-act="decline">${esc(t("d.declineDare"))}</button>`);
+      } else if (S.me === c.creator) {
+        if (c.kind === "duel" && !inIt) a.push(`<button class="btn block" data-act="join">${esc(t("d.join", { amt: gbp(c.stake) }))}</button>`);
+        const enough = c.kind === "personal" ? (c.backers || []).length >= 1 : dare ? targetAccepted(c) : players.length >= 2;
+        a.push(`<button class="btn block" data-act="start" ${enough ? "" : "disabled"}>${esc(t("d.start"))}</button>`);
+        if (!enough) a.push(`<p class="note" style="margin:0">${esc(c.kind === "personal" ? t("d.waitBacker") : dare ? t("d.waitTarget", { name: nameOf(c.target) }) : t("d.waitPlayer"))}</p>`);
+        a.push(`<button class="btn warn block" data-act="cancel">${esc(t("d.cancel"))}</button>`);
       } else {
-        a.push(`<p class="note" style="margin:0">${esc(nameOf(c.creator))} pornește challenge-ul când s-au strâns jucătorii.</p>`);
+        if (!inIt) a.push(`<button class="btn block" data-act="join">${esc(t(solo ? "d.betAgainst" : "d.join", { amt: gbp(c.stake) }))}</button>`);
+        else a.push(`<button class="btn ghost block" data-act="leave">${esc(t("d.leave"))}</button>`);
+        a.push(`<p class="note" style="margin:0">${esc(dare && !targetAccepted(c) ? t("d.waitTarget", { name: nameOf(c.target) }) : t("d.creatorStarts", { name: nameOf(c.creator) }))}</p>`);
       }
     }
-    if (c.status === "active" && inIt) a.push(`<button class="btn ghost block" data-act="vote">Gata, trecem la vot</button>`);
+    if (c.status === "active" && inIt) a.push(`<button class="btn ghost block" data-act="vote">${esc(t("d.toVote"))}</button>`);
     if (c.status === "voting" && inIt) {
       const cast = Object.keys(S.votes).length, need = votesNeeded(c);
-      a.push(`<button class="btn block" data-act="settle" ${cast >= need ? "" : "disabled"}>Închide votul și calculează</button>`);
+      a.push(`<button class="btn block" data-act="settle" ${cast >= need ? "" : "disabled"}>${esc(t("d.settle"))}</button>`);
     }
     $("detailActions").innerHTML = a.join("");
+    renderInvites(c);
     renderOffers(c);
     renderChat(c, scrollChat);
+  }
+
+  // ---------- invites & join requests ----------
+  function inviteCandidates(c) {
+    const pend = new Set(pendingFor(c.id).map(r => r.user_id));
+    return Object.values(S.members).filter(m => m.user_id !== S.me && !isPlayer(c, m.user_id) && !(c.kind === "dare" && m.user_id === c.target) && !pend.has(m.user_id));
+  }
+  function chipsHtml(list, set, attr) {
+    return list.map(m => `<button type="button" ${attr}="${esc(m.user_id)}" aria-pressed="${set.has(m.user_id)}">${esc(m.nick)}</button>`).join("");
+  }
+  function renderInvites(c) {
+    const pend = pendingFor(c.id);
+    const joinable = canJoinNow(c) && ["open", "active"].includes(c.status);
+    const player = isPlayer(c, S.me) || c.creator === S.me;
+    const myPending = pend.find(r => r.user_id === S.me);
+    const cands = inviteCandidates(c);
+    const canInvite = joinable && player && cands.length > 0;
+    const canRequest = c.status === "active" && joinable && !player && !myPending && !(c.kind === "dare" && c.target === S.me);
+    $("inviteBox").hidden = !(pend.length || canInvite || canRequest);
+    if ($("inviteBox").hidden) { $("inviteForm").hidden = true; return; }
+    const we = windowEnd(c);
+    $("windowNote").textContent = c.status === "active" && we ? t("inv.window", { when: fmtStamp(we) }) : c.status === "open" ? t("inv.openNote") : "";
+    $("inviteList").innerHTML = pend.map(r => {
+      let line, btns = "";
+      if (r.kind === "invite") {
+        line = r.user_id === S.me ? t("inv.invitedYou", { by: nameOf(r.created_by) }) : r.created_by === S.me ? t("inv.youInvited", { name: nameOf(r.user_id) }) : t("inv.invitedBy", { by: nameOf(r.created_by), name: nameOf(r.user_id) });
+        if (r.user_id === S.me) btns = `<div class="btns"><button class="btn sm" data-join-accept="${esc(r.id)}">${esc(t("inv.accept"))}</button><button class="btn sm ghost" data-join-decline="${esc(r.id)}">${esc(t("inv.decline"))}</button></div>`;
+        else if (r.created_by === S.me) btns = `<div class="btns"><button class="btn sm ghost" data-join-cancel="${esc(r.id)}">${esc(t("inv.withdraw"))}</button></div><span class="state">${esc(t("inv.waitUser", { name: nameOf(r.user_id) }))}</span>`;
+        else btns = `<span class="state">${esc(t("inv.waitUser", { name: nameOf(r.user_id) }))}</span>`;
+      } else {
+        line = t("inv.asks", { name: nameOf(r.user_id) });
+        if (c.creator === S.me) btns = `<div class="btns"><button class="btn sm" data-join-accept="${esc(r.id)}">${esc(t("inv.accept"))}</button><button class="btn sm ghost" data-join-decline="${esc(r.id)}">${esc(t("inv.decline"))}</button></div>`;
+        else if (r.created_by === S.me) btns = `<div class="btns"><button class="btn sm ghost" data-join-cancel="${esc(r.id)}">${esc(t("inv.withdraw"))}</button></div><span class="state">${esc(t("inv.waitCreator", { name: nameOf(c.creator) }))}</span>`;
+        else btns = `<span class="state">${esc(t("inv.waitCreator", { name: nameOf(c.creator) }))}</span>`;
+      }
+      return `<div class="offer pending"><div class="head">${face(r.user_id)}${esc(line)}</div>${btns}</div>`;
+    }).join("");
+    $("inviteToggle").hidden = !canInvite || !$("inviteForm").hidden;
+    $("requestBtn").hidden = !canRequest;
+    if (!canInvite) $("inviteForm").hidden = true;
+    else if (!$("inviteForm").hidden) $("inviteFormChips").innerHTML = chipsHtml(cands, S.addInvite, "data-add-inv");
   }
 
   // ---------- counter-offers ----------
@@ -444,19 +548,19 @@
     $("offerBox").hidden = !(canPropose || pending.length || (open && decided.length));
     if ($("offerBox").hidden) return;
     const terms = (o) => `<dl class="terms">
-        ${o.descr != null ? `<dt>Reguli</dt><dd>${c.descr && o.status === "pending" ? `<span class="was">${esc(c.descr)}</span>` : ""}${esc(o.descr)}</dd>` : ""}
-        ${o.stake != null ? `<dt>Miză</dt><dd class="mono">${o.status === "pending" ? `<span class="was">${esc(gbp(c.stake))}</span>` : ""}${esc(gbp(o.stake))} de persoană</dd>` : ""}
+        ${o.descr != null ? `<dt>${esc(t("o.rules"))}</dt><dd>${c.descr && o.status === "pending" ? `<span class="was">${esc(c.descr)}</span>` : ""}${esc(o.descr)}</dd>` : ""}
+        ${o.stake != null ? `<dt>${esc(t("o.stake"))}</dt><dd class="mono">${o.status === "pending" ? `<span class="was">${esc(gbp(c.stake))}</span>` : ""}${esc(t("d.perPerson", { amt: gbp(o.stake) }))}</dd>` : ""}
       </dl>`;
     const items = pending.map(o => {
-      let btns = "";
-      if (open && c.creator === S.me) btns = `<div class="btns"><button class="btn sm" data-offer-accept="${esc(o.id)}">Acceptă</button><button class="btn sm ghost" data-offer-reject="${esc(o.id)}">Refuză</button></div>
-        <span class="state">Dacă accepți, cine intrase deja trebuie să intre din nou cu noii termeni.</span>`;
-      else if (o.proposer === S.me) btns = `<div class="btns"><button class="btn sm ghost" data-offer-withdraw="${esc(o.id)}">Retrage contra-oferta</button></div><span class="state">Așteaptă răspunsul lui ${esc(nameOf(c.creator))}.</span>`;
-      else btns = `<span class="state">Așteaptă răspunsul lui ${esc(nameOf(c.creator))}.</span>`;
-      return `<div class="offer pending"><div class="head">${face(o.proposer)}${esc(nameOf(o.proposer))} propune:</div>${terms(o)}${btns}</div>`;
+      let btns;
+      if (open && c.creator === S.me) btns = `<div class="btns"><button class="btn sm" data-offer-accept="${esc(o.id)}">${esc(t("o.accept"))}</button><button class="btn sm ghost" data-offer-reject="${esc(o.id)}">${esc(t("o.reject"))}</button></div>
+        <span class="state">${esc(t("o.acceptNote"))}</span>`;
+      else if (o.proposer === S.me) btns = `<div class="btns"><button class="btn sm ghost" data-offer-withdraw="${esc(o.id)}">${esc(t("o.withdraw"))}</button></div><span class="state">${esc(t("o.waiting", { name: nameOf(c.creator) }))}</span>`;
+      else btns = `<span class="state">${esc(t("o.waiting", { name: nameOf(c.creator) }))}</span>`;
+      return `<div class="offer pending"><div class="head">${face(o.proposer)}${esc(o.proposer === S.me ? t("o.youPropose") : t("o.proposes", { name: nameOf(o.proposer) }))}</div>${terms(o)}${btns}</div>`;
     });
-    const history = decided.slice(-3).map(o => `<div class="offer"><div class="head">${face(o.proposer)}${esc(nameOf(o.proposer))}</div>${terms(o)}<span class="state">${o.status === "accepted" ? "Acceptată" : "Refuzată"}</span></div>`);
-    $("offerList").innerHTML = items.concat(history).join("") || "";
+    const history = decided.slice(-3).map(o => `<div class="offer"><div class="head">${face(o.proposer)}${esc(nameOf(o.proposer))}</div>${terms(o)}<span class="state">${esc(t(o.status === "accepted" ? "o.accepted" : "o.rejected"))}</span></div>`);
+    $("offerList").innerHTML = items.concat(history).join("");
     $("offerList").hidden = !items.length && !history.length;
     $("offerToggle").hidden = !canPropose || !$("offerForm").hidden;
     if (!canPropose) $("offerForm").hidden = true;
@@ -471,7 +575,7 @@
   function renderAccount() {
     const g = curGroup();
     $("accEmail").textContent = (S.session && S.session.user && S.session.user.email) || "";
-    $("accTitle").textContent = g ? g.name : "Contul meu";
+    $("inviteTitle").textContent = t("invite.titleTo", { group: g ? g.name : "" });
     if (g && document.activeElement !== $("accNick")) $("accNick").value = g.nick;
     if (g && document.activeElement !== $("grpRename")) $("grpRename").value = g.name;
     $("adminTools").hidden = !(g && g.is_admin);
@@ -481,40 +585,63 @@
   function renderTop() {
     const g = curGroup();
     $("grpName").textContent = g ? g.name : "";
-    const me = S.members[S.me];
-    $("meBtn").innerHTML = me ? `${face(S.me, "av")}<span>${esc(me.nick)}</span>` : "";
   }
   function renderAll() {
     if (!S.me) return;
     if (!S.gid) { renderStart(); return; }
-    renderTop(); renderList(); renderLedger(); renderDetail(); renderAccount();
-    if (!$("groupsSheet").hidden) renderGroupsSheet();
+    renderTop(); renderList(); renderLedger(); renderDetail(); renderAccount(); renderTargets();
     if (!$("startView").hidden || !$("loading").hidden || !$("authView").hidden) go(S.tab);
+  }
+
+  // ---------- new challenge form ----------
+  function setKind(k) {
+    S.kind = k;
+    document.querySelectorAll("[data-kind]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.kind === k)));
+    $("targetField").hidden = k !== "dare";
+    renderTargets();
+  }
+  function renderTargets() {
+    const sel = $("nTarget"); const keep = sel.value;
+    const others = Object.values(S.members).filter(m => m.user_id !== S.me).sort((a, b) => a.nick.localeCompare(b.nick, I.locale));
+    sel.innerHTML = others.length
+      ? `<option value="">${esc(t("new.targetPick"))}</option>` + others.map(m => `<option value="${esc(m.user_id)}">${esc(m.nick)}</option>`).join("")
+      : `<option value="">${esc(t("new.noFriends"))}</option>`;
+    if (others.some(m => m.user_id === keep)) sel.value = keep;
+    renderNewInvites();
+  }
+  function renderNewInvites() {
+    const others = Object.values(S.members).filter(m => m.user_id !== S.me && !(S.kind === "dare" && m.user_id === $("nTarget").value))
+      .sort((a, b) => a.nick.localeCompare(b.nick, I.locale));
+    for (const id of [...S.newInvite]) if (!others.some(m => m.user_id === id)) S.newInvite.delete(id);
+    $("inviteField").hidden = !others.length;
+    $("inviteChips").innerHTML = chipsHtml(others, S.newInvite, "data-new-inv");
+  }
+  function renderStakeChips() {
+    const custom = $("nStake").value.trim();
+    $("stakeChips").innerHTML = [5, 10, 20, 50].map(v => `<button type="button" data-stake="${v}" aria-pressed="${!custom && S.stake === v}">£${v}</button>`).join("");
   }
 
   // ---------- actions ----------
   async function act(kind) {
     const c = S.challenges.find(x => x.id === S.openId); if (!c) return;
+    const dareTarget = c.kind === "dare" && c.target === S.me;
     const map = {
-      join: ["join_challenge", "Ai intrat. Miza ta: " + gbp(c.stake)], leave: ["leave_challenge", "Ai ieșit."],
-      start: ["start_challenge", "Challenge pornit."], cancel: ["cancel_challenge", "Challenge anulat."],
-      vote: ["open_voting", "S-a deschis votul."], settle: ["settle_challenge", "Gata. Socoteala e actualizată."]
+      join: ["join_challenge", dareTarget ? t("toast.acceptedDare") : t("toast.joinedCh", { amt: gbp(c.stake) })],
+      leave: ["leave_challenge", t("toast.left")],
+      start: ["start_challenge", t("toast.started")], cancel: ["cancel_challenge", t("toast.cancelled")],
+      decline: ["cancel_challenge", t("toast.declinedDare")],
+      vote: ["open_voting", t("toast.voteOpen")], settle: ["settle_challenge", t("toast.settled")]
     };
-    if (kind === "cancel" && !confirmInline("cancel")) return;
+    if ((kind === "cancel" || kind === "decline") && !confirmInline(kind)) return;
     const [fn, msg] = map[kind];
     await rpc(fn, { p_id: c.id }, msg);
   }
   let armed = null, armTimer = null;
   function confirmInline(key) {
     if (armed === key) { armed = null; clearTimeout(armTimer); return true; }
-    armed = key; toast("Apasă încă o dată ca să confirmi.");
+    armed = key; toast(t("toast.confirm"));
     clearTimeout(armTimer); armTimer = setTimeout(() => { armed = null; }, 4000);
     return false;
-  }
-
-  function renderStakeChips() {
-    const custom = $("nStake").value.trim();
-    $("stakeChips").innerHTML = [5, 10, 20, 50].map(v => `<button type="button" data-stake="${v}" aria-pressed="${!custom && S.stake === v}">£${v}</button>`).join("");
   }
 
   async function shrinkImage(file) {
@@ -531,61 +658,70 @@
   }
   async function uploadPhoto(file, tag) {
     const blob = await shrinkImage(file);
-    if (blob.size > 10 * 1024 * 1024) throw new Error("Poza e prea mare (maxim 10 MB).");
+    if (blob.size > 10 * 1024 * 1024) throw new Error(t("photo.tooBig"));
     const ext = blob.type === "image/jpeg" ? "jpg" : ((file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg");
     const path = `${S.me}/${tag}-${Date.now()}.${ext}`;
     const up = await sb.storage.from("proofs").upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: false });
-    if (up.error) throw new Error(/mime|type/i.test(up.error.message) ? "Formatul pozei nu e acceptat. Folosește JPG sau PNG." : errText(up.error));
+    if (up.error) throw new Error(/mime|type/i.test(up.error.message) ? t("photo.badType") : errText(up.error));
     return path;
   }
 
   // ---------- events ----------
   document.addEventListener("click", async (e) => {
-    const t = e.target.closest("button"); if (!t || t.disabled) return;
-    if (t.dataset.open) openDetail(t.dataset.open);
-    else if (t.dataset.tab) { closeSheets(); go(t.dataset.tab); }
-    else if (t.dataset.act) act(t.dataset.act);
-    else if (t.dataset.close !== undefined) closeSheets();
-    else if (t.dataset.switch) switchGroup(t.dataset.switch);
-    else if (t.dataset.logout !== undefined) { unsubscribe(); await sb.auth.signOut(); }
-    else if (t.dataset.month) { S.month = t.dataset.month; renderLedger(); window.scrollTo(0, 0); }
-    else if (t.dataset.stake) { S.stake = +t.dataset.stake; $("nStake").value = ""; renderStakeChips(); }
-    else if (t.dataset.vote) { if (S.openId) await rpc("cast_vote", { p_id: S.openId, p_pick: t.dataset.vote }, "Vot înregistrat"); }
-    else if (t.dataset.paid !== undefined) {
-      const d = S._debts && S._debts[+t.dataset.paid]; if (!d) return;
-      if (!confirmInline("pay" + t.dataset.paid)) return;
-      await rpc("record_payment", { p_group: S.gid, p_period: S.month + "-01", p_from: d.from, p_to: d.to, p_amount: d.amount }, "Plată bifată");
+    const b = e.target.closest("button"); if (!b || b.disabled) return;
+    if (b.dataset.lang) { I.setLang(b.dataset.lang); return; }
+    if (b.dataset.open) openDetail(b.dataset.open);
+    else if (b.dataset.tab) { closeSheets(); go(b.dataset.tab); }
+    else if (b.dataset.act) act(b.dataset.act);
+    else if (b.dataset.close !== undefined) closeSheets();
+    else if (b.dataset.switch) switchGroup(b.dataset.switch);
+    else if (b.dataset.kind) setKind(b.dataset.kind);
+    else if (b.dataset.logout !== undefined) { unsubscribe(); await sb.auth.signOut(); }
+    else if (b.dataset.month) { S.month = b.dataset.month; renderLedger(); window.scrollTo(0, 0); }
+    else if (b.dataset.stake) { S.stake = +b.dataset.stake; $("nStake").value = ""; renderStakeChips(); }
+    else if (b.dataset.vote) { if (S.openId) await rpc("cast_vote", { p_id: S.openId, p_pick: b.dataset.vote }, t("toast.voted")); }
+    else if (b.dataset.paid !== undefined) {
+      const d = S._debts && S._debts[+b.dataset.paid]; if (!d) return;
+      if (!confirmInline("pay" + b.dataset.paid)) return;
+      await rpc("record_payment", { p_group: S.gid, p_period: S.month + "-01", p_from: d.from, p_to: d.to, p_amount: d.amount }, t("toast.paid"));
     }
-    else if (t.dataset.offerAccept) { if (!confirmInline("acc" + t.dataset.offerAccept)) return; await rpc("respond_counter", { p_offer: t.dataset.offerAccept, p_accept: true }, "Contra-ofertă acceptată. Termenii s-au schimbat."); }
-    else if (t.dataset.offerReject) { await rpc("respond_counter", { p_offer: t.dataset.offerReject, p_accept: false }, "Contra-ofertă refuzată"); }
-    else if (t.dataset.offerWithdraw) { await rpc("withdraw_counter", { p_offer: t.dataset.offerWithdraw }, "Contra-ofertă retrasă"); }
-    else if (t.dataset.unpay) { if (!confirmInline("unpay" + t.dataset.unpay)) return; await rpc("delete_payment", { p_id: t.dataset.unpay }, "Plată anulată"); }
+    else if (b.dataset.offerAccept) { if (!confirmInline("acc" + b.dataset.offerAccept)) return; await rpc("respond_counter", { p_offer: b.dataset.offerAccept, p_accept: true }, t("toast.offerAccepted")); }
+    else if (b.dataset.offerReject) { await rpc("respond_counter", { p_offer: b.dataset.offerReject, p_accept: false }, t("toast.offerRejected")); }
+    else if (b.dataset.offerWithdraw) { await rpc("withdraw_counter", { p_offer: b.dataset.offerWithdraw }, t("toast.offerWithdrawn")); }
+    else if (b.dataset.newInv) { const id = b.dataset.newInv; S.newInvite.has(id) ? S.newInvite.delete(id) : S.newInvite.add(id); b.setAttribute("aria-pressed", String(S.newInvite.has(id))); }
+    else if (b.dataset.addInv) { const id = b.dataset.addInv; S.addInvite.has(id) ? S.addInvite.delete(id) : S.addInvite.add(id); b.setAttribute("aria-pressed", String(S.addInvite.has(id))); }
+    else if (b.dataset.joinAccept) { const r = S.invites.find(x => x.id === b.dataset.joinAccept); await rpc("respond_join", { p_req: b.dataset.joinAccept, p_accept: true }, t(r && r.kind === "request" ? "toast.requestAccepted" : "toast.inviteAccepted")); }
+    else if (b.dataset.joinDecline) { await rpc("respond_join", { p_req: b.dataset.joinDecline, p_accept: false }, t("toast.inviteDeclined")); }
+    else if (b.dataset.joinCancel) { await rpc("cancel_join", { p_req: b.dataset.joinCancel }, t("toast.withdrawn")); }
+    else if (b.dataset.unpay) { if (!confirmInline("unpay" + b.dataset.unpay)) return; await rpc("delete_payment", { p_id: b.dataset.unpay }, t("toast.unpaid")); }
   });
   document.addEventListener("submit", (e) => {
     const form = e.target.closest("form[data-form]");
     if (!form) return;
     e.preventDefault(); submitGroupForm(form);
   });
+  window.addEventListener("cp-lang", () => {
+    setMode(S.mode);
+    renderStakeChips();
+    if (S.me && S.gid && S.loaded) renderAll();
+  });
 
-  $("grpBtn").onclick = () => { $("groupsSheet").hidden = false; renderGroupsSheet(); };
-  $("meBtn").onclick = openAccount;
+  $("grpBtn").onclick = openAccount;
   $("copyInvite").onclick = async () => {
     const g = curGroup();
-    const text = `Hai în grupul „${g ? g.name : ""}” pe Challenge Pot: ${location.origin + location.pathname.replace(/index\.html$/, "")}\nFă-ți cont, apoi intră cu codul: ${$("inviteCode").textContent}`;
-    try { await navigator.clipboard.writeText(text); toast("Invitația e copiată. Lipește-o pe WhatsApp."); }
-    catch { toast("Copiază manual codul de mai sus."); }
+    const text = t("invite.text", { group: g ? g.name : "", url: location.origin + location.pathname.replace(/index\.html$/, ""), code: $("inviteCode").textContent });
+    try { await navigator.clipboard.writeText(text); toast(t("toast.inviteCopied")); }
+    catch { toast(t("toast.copyManual")); }
   };
   $("newCodeBtn").onclick = async () => {
     if (!confirmInline("newcode")) return;
-    const r = await rpc("new_invite_code", { p_group: S.gid }, "Cod nou generat");
+    const r = await rpc("new_invite_code", { p_group: S.gid }, t("toast.newCode"));
     if (r.ok && r.data) $("inviteCode").textContent = r.data;
   };
-  $("renameForm").addEventListener("submit", async (e) => { e.preventDefault(); await rpc("rename_group", { p_group: S.gid, p_name: $("grpRename").value }, "Nume salvat"); });
-  $("nickForm").addEventListener("submit", async (e) => { e.preventDefault(); await rpc("set_nick", { p_group: S.gid, p_nick: $("accNick").value }, "Nume salvat"); });
-
-  $("kindDuel").onclick = () => { S.kind = "duel"; $("kindDuel").setAttribute("aria-pressed", "true"); $("kindPersonal").setAttribute("aria-pressed", "false"); };
-  $("kindPersonal").onclick = () => { S.kind = "personal"; $("kindPersonal").setAttribute("aria-pressed", "true"); $("kindDuel").setAttribute("aria-pressed", "false"); };
+  $("renameForm").addEventListener("submit", async (e) => { e.preventDefault(); await rpc("rename_group", { p_group: S.gid, p_name: $("grpRename").value }, t("toast.saved")); });
+  $("nickForm").addEventListener("submit", async (e) => { e.preventDefault(); await rpc("set_nick", { p_group: S.gid, p_nick: $("accNick").value }, t("toast.saved")); });
   $("nStake").addEventListener("input", renderStakeChips);
+  $("nTarget").addEventListener("change", renderNewInvites);
 
   $("newForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -593,32 +729,53 @@
     const title = $("nTitle").value.trim();
     const raw = $("nStake").value.trim().replace(",", ".").replace(/[£\s]/g, "");
     const stake = raw ? Number(raw) : S.stake;
-    if (!title) { msg.textContent = "Scrie ce trebuie făcut."; $("nTitle").focus(); return; }
-    if (!Number.isFinite(stake) || stake < 0.5 || stake > 1000) { msg.textContent = "Miza trebuie să fie între £0.50 și £1000."; $("nStake").focus(); return; }
+    const target = S.kind === "dare" ? $("nTarget").value : null;
+    if (S.kind === "dare" && !target) { msg.textContent = t("new.needTarget"); $("nTarget").focus(); return; }
+    if (!title) { msg.textContent = t("new.needWhat"); $("nTitle").focus(); return; }
+    if (!Number.isFinite(stake) || stake < 0.5 || stake > 1000) { msg.textContent = t("stakeRange"); $("nStake").focus(); return; }
     $("createBtn").disabled = true;
     let photo = null;
     try {
       const file = $("nPhoto").files && $("nPhoto").files[0];
-      if (file) { $("createBtn").textContent = "Se încarcă poza…"; photo = await uploadPhoto(file, "challenge"); }
-      const r = await rpc("create_challenge", { p_group: S.gid, p_title: title, p_descr: $("nDesc").value.trim(), p_kind: S.kind, p_stake: r2(stake), p_deadline: $("nDeadline").value || null, p_photo_path: photo }, "Challenge lansat");
-      if (r.ok) { $("newForm").reset(); S.stake = 10; renderStakeChips(); go("list"); if (r.data) openDetail(r.data); }
+      if (file) { $("createBtn").textContent = t("photo.uploading"); photo = await uploadPhoto(file, "challenge"); }
+      const args = { p_group: S.gid, p_title: title, p_descr: $("nDesc").value.trim(), p_kind: S.kind, p_stake: r2(stake), p_deadline: $("nDeadline").value || null, p_photo_path: photo };
+      if (target) args.p_target = target;
+      if (S.newInvite.size) args.p_invite = [...S.newInvite];
+      const r = await rpc("create_challenge", args, t("toast.launched"));
+      if (r.ok) { $("newForm").reset(); S.stake = 10; S.newInvite = new Set(); setKind("duel"); renderStakeChips(); go("list"); if (r.data) openDetail(r.data); }
       else if (r.error) msg.textContent = errText(r.error);
     } catch (err) { msg.textContent = err.message || errText(err); }
-    finally { $("createBtn").disabled = false; $("createBtn").textContent = "Lansează challenge-ul"; }
+    finally { $("createBtn").disabled = false; $("createBtn").textContent = t("new.launch"); }
   });
 
   $("pSend").onclick = async () => {
     const id = S.openId; if (!id) return;
     const text = $("pText").value.trim();
     const file = $("pPhoto").files && $("pPhoto").files[0];
-    if (!text && !file) { toast("Scrie ceva sau adaugă o poză."); return; }
-    $("pSend").disabled = true; $("pSend").textContent = file ? "Se încarcă poza…" : "Se trimite…";
+    if (!text && !file) { toast(t("toast.writeOrPhoto")); return; }
+    $("pSend").disabled = true; $("pSend").textContent = t(file ? "photo.uploading" : "sending");
     try {
       const path = file ? await uploadPhoto(file, id) : null;
-      const r = await rpc("submit_proof", { p_id: id, p_body: text, p_photo_path: path }, "Dovadă trimisă");
+      const r = await rpc("submit_proof", { p_id: id, p_body: text, p_photo_path: path }, t("toast.proofSent"));
       if (r.ok) { $("pText").value = ""; $("pPhoto").value = ""; }
-    } catch (e) { toast(e.message || errText(e)); }
+    } catch (err) { toast(err.message || errText(err)); }
     finally { $("pSend").disabled = false; renderDetail(); }
+  };
+
+  $("inviteToggle").onclick = () => {
+    const c = S.challenges.find(x => x.id === S.openId); if (!c) return;
+    S.addInvite = new Set(); $("inviteForm").hidden = false; $("inviteToggle").hidden = true;
+    $("inviteFormChips").innerHTML = chipsHtml(inviteCandidates(c), S.addInvite, "data-add-inv");
+  };
+  $("inviteSend").onclick = async () => {
+    const c = S.challenges.find(x => x.id === S.openId); if (!c) return;
+    if (!S.addInvite.size) { toast(t("inv.pick")); return; }
+    const r = await rpc("invite_to_challenge", { p_id: c.id, p_users: [...S.addInvite] }, t("toast.invitesSent"));
+    if (r.ok) { S.addInvite = new Set(); $("inviteForm").hidden = true; renderDetail(); }
+  };
+  $("requestBtn").onclick = async () => {
+    const c = S.challenges.find(x => x.id === S.openId); if (!c) return;
+    await rpc("request_join", { p_id: c.id }, t("toast.requestSent"));
   };
 
   $("offerToggle").onclick = () => {
@@ -633,11 +790,11 @@
     const descr = $("oDescr").value.trim();
     const raw = $("oStake").value.trim().replace(",", ".").replace(/[£\s]/g, "");
     const stake = raw ? Number(raw) : null;
-    if (stake !== null && (!Number.isFinite(stake) || stake < 0.5 || stake > 1000)) { msg.textContent = "Miza trebuie să fie între £0.50 și £1000."; return; }
+    if (stake !== null && (!Number.isFinite(stake) || stake < 0.5 || stake > 1000)) { msg.textContent = t("stakeRange"); return; }
     const sameDescr = descr === (c.descr || "").trim(), sameStake = stake === null || r2(stake) === r2(c.stake);
-    if ((sameDescr || !descr) && sameStake) { msg.textContent = "Schimbă regulile sau miza ca să faci o contra-ofertă."; return; }
+    if ((sameDescr || !descr) && sameStake) { msg.textContent = t("offer.needChange"); return; }
     $("oSend").disabled = true;
-    const r = await rpc("propose_counter", { p_id: c.id, p_descr: sameDescr ? null : descr, p_stake: sameStake ? null : r2(stake) }, "Contra-ofertă trimisă");
+    const r = await rpc("propose_counter", { p_id: c.id, p_descr: sameDescr ? null : descr, p_stake: sameStake ? null : r2(stake) }, t("toast.offerSent"));
     $("oSend").disabled = false;
     if (r.ok) { $("offerForm").hidden = true; renderDetail(); }
     else if (r.error) msg.textContent = errText(r.error);
@@ -662,19 +819,18 @@
     S.mode = m;
     $("modeLogin").setAttribute("aria-pressed", String(m === "login"));
     $("modeSignup").setAttribute("aria-pressed", String(m === "signup"));
-    $("authBtn").textContent = m === "login" ? "Intră" : "Creează contul";
+    $("authBtn").textContent = t(m === "login" ? "auth.signIn" : "auth.create");
     $("aPass").setAttribute("autocomplete", m === "login" ? "current-password" : "new-password");
     $("passHint").hidden = m === "login";
-    $("authMsg").textContent = "";
   }
-  $("modeLogin").onclick = () => setMode("login");
-  $("modeSignup").onclick = () => setMode("signup");
+  $("modeLogin").onclick = () => { setMode("login"); $("authMsg").textContent = ""; };
+  $("modeSignup").onclick = () => { setMode("signup"); $("authMsg").textContent = ""; };
   $("authForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const msg = $("authMsg"); msg.textContent = "";
     const email = $("aEmail").value.trim(), password = $("aPass").value;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.textContent = "Adresa de email nu pare corectă."; $("aEmail").focus(); return; }
-    if (password.length < 6) { msg.textContent = "Parola trebuie să aibă minim 6 caractere."; $("aPass").focus(); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.textContent = t("err.email"); $("aEmail").focus(); return; }
+    if (password.length < 6) { msg.textContent = t("err.passLen"); $("aPass").focus(); return; }
     $("authBtn").disabled = true;
     try {
       if (S.mode === "signup") {

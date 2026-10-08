@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="ro">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Challenge Pot</title>
-<meta name="description" content="Challenge-uri între prieteni, cu mize în £.">
+<meta name="description" content="Challenges between friends, with stakes in £.">
 <meta name="theme-color" content="#1E6E47">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -16,67 +16,76 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="style.css?v=28d6d21">
+<link rel="stylesheet" href="style.css?v=20261008-6">
+<script src="i18n.js?v=20261008-6"></script>
 </head>
 <body>
 <header id="topbar">
   <div class="brand">Challenge <b>Pot</b></div>
-  <button class="grp" id="grpBtn" hidden aria-label="Schimbă grupul"><span id="grpName"></span><span aria-hidden="true">▾</span></button>
-  <button class="me" id="meBtn" hidden aria-label="Contul meu și grupurile mele"></button>
+  <div class="langsw" id="langTop" role="group" aria-label="Language">
+    <button type="button" data-lang="en" aria-pressed="true">EN</button><button type="button" data-lang="ro" aria-pressed="false">RO</button>
+  </div>
+  <button class="grp" id="grpBtn" hidden data-i18n-aria="aria.switchGroup" aria-label="Switch group"><span id="grpName"></span><span aria-hidden="true">▾</span></button>
 </header>
 
 <main class="wrap" id="loading">
-  <div class="hero"><h1>Pariuri între prieteni, <em>în £</em>.</h1><p class="muted">Se încarcă…</p></div>
+  <div class="hero"><h1 data-i18n-html="hero.bets">Bets between friends, <em>in £</em>.</h1><p class="muted" data-i18n="loading">Loading…</p></div>
 </main>
 
 <!-- auth -->
 <section class="wrap" id="authView" hidden>
   <div class="hero">
-    <h1>Pariuri între prieteni, <em>în £</em>.</h1>
-    <p class="muted">Lansezi provocări, prietenii intră cu bani, votați cine a câștigat, iar aplicația ține socoteala cine cui datorează.</p>
+    <h1 data-i18n-html="hero.bets">Bets between friends, <em>in £</em>.</h1>
+    <p class="muted" data-i18n="auth.intro">Start challenges, friends put money in, you vote on who won, and the app keeps track of who owes whom.</p>
   </div>
   <div class="card stack">
     <div class="seg" role="tablist">
-      <button type="button" id="modeLogin" aria-pressed="true"><strong>Am cont</strong><span>Intră cu emailul</span></button>
-      <button type="button" id="modeSignup" aria-pressed="false"><strong>Cont nou</strong><span>Prima dată aici</span></button>
+      <button type="button" id="modeLogin" aria-pressed="true"><strong data-i18n="auth.have">I have an account</strong><span data-i18n="auth.haveSub">Sign in with email</span></button>
+      <button type="button" id="modeSignup" aria-pressed="false"><strong data-i18n="auth.new">New account</strong><span data-i18n="auth.newSub">First time here</span></button>
     </div>
     <form id="authForm" class="stack" novalidate>
-      <div class="field"><label for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email" inputmode="email" autocapitalize="off" required></div>
-      <div class="field"><label for="aPass">Parolă</label><input id="aPass" type="password" autocomplete="current-password" minlength="6" required>
-        <span class="note" id="passHint" hidden>Minim 6 caractere.</span></div>
-      <button class="btn block" type="submit" id="authBtn">Intră</button>
+      <div class="field"><label for="aEmail" data-i18n="auth.email">Email</label><input id="aEmail" type="email" autocomplete="email" inputmode="email" autocapitalize="off" required></div>
+      <div class="field"><label for="aPass" data-i18n="auth.password">Password</label><input id="aPass" type="password" autocomplete="current-password" minlength="6" required>
+        <span class="note" id="passHint" hidden data-i18n="auth.passHint">At least 6 characters.</span></div>
+      <button class="btn block" type="submit" id="authBtn">Sign in</button>
       <p class="formmsg" id="authMsg" role="alert"></p>
     </form>
-    <p class="note">Ai uitat parola? Spune-i lui Lucian, ți-o resetează el.</p>
+    <p class="note" data-i18n="auth.forgot">Forgot your password? Ask Lucian to reset it.</p>
   </div>
 </section>
 
 <!-- no group yet -->
 <section class="wrap" id="startView" hidden>
-  <div class="hero"><h1>Alege-ți <em>grupul</em>.</h1><p class="muted">Intră cu codul primit de la prieteni sau fă un grup nou și trimite-le codul lui.</p></div>
+  <div class="hero"><h1 data-i18n-html="start.title">Pick your <em>group</em>.</h1><p class="muted" data-i18n="start.intro">Join with the code your friends sent you, or create a new group and send them its code.</p></div>
   <div class="stack" id="startForms"></div>
-  <button class="btn ghost block" type="button" data-logout>Ieși din cont</button>
+  <button class="btn ghost block" type="button" data-logout data-i18n="signOut">Sign out</button>
 </section>
 
 <!-- tabs -->
 <section class="wrap" id="tabList" hidden><div id="listBody"></div></section>
 
 <section class="wrap" id="tabNew" hidden>
-  <h2>Challenge nou</h2>
+  <h2 data-i18n="new.title">New challenge</h2>
   <form id="newForm" class="stack" novalidate>
-    <div class="seg" role="group" aria-label="Tip">
-      <button type="button" id="kindDuel" aria-pressed="true"><strong>Unul contra altuia</strong><span>Toți pun miza, câștigătorul ia potul</span></button>
-      <button type="button" id="kindPersonal" aria-pressed="false"><strong>Provocare personală</strong><span>Tu încerci, ceilalți pariază contra</span></button>
+    <div class="seg seg3" role="group">
+      <button type="button" data-kind="duel" aria-pressed="true"><strong data-i18n="kind.duel">Head to head</strong><span data-i18n="kind.duelSub">Everyone stakes, the winner takes the pot</span></button>
+      <button type="button" data-kind="dare" aria-pressed="false"><strong data-i18n="kind.dare">Challenge a friend</strong><span data-i18n="kind.dareSub">Pick a friend; you bet they can't do it</span></button>
+      <button type="button" data-kind="personal" aria-pressed="false"><strong data-i18n="kind.personal">Personal challenge</strong><span data-i18n="kind.personalSub">You try it, the others bet against you</span></button>
     </div>
-    <div class="field"><label for="nTitle">Provocarea</label><input id="nTitle" maxlength="90" placeholder="ex: Cine face mai mulți pași săptămâna asta"></div>
-    <div class="field"><label for="nDesc">Reguli și cum se dovedește</label><textarea id="nDesc" maxlength="600" placeholder="ex: Screenshot din aplicația de pași duminică seara"></textarea></div>
-    <div class="field"><label for="nPhoto">Poză (opțional)</label><input id="nPhoto" type="file" accept="image/*"></div>
-    <div class="field"><label>Miza de persoană</label>
+    <div class="field" id="targetField" hidden><label for="nTarget" data-i18n="new.target">Who are you challenging?</label>
+      <select id="nTarget"></select></div>
+    <div class="field" id="inviteField"><label data-i18n="new.invite">Invite friends (optional)</label>
+      <div class="chips" id="inviteChips"></div>
+      <p class="note" style="margin:6px 0 0" data-i18n="new.inviteHelp">They'll see the invite in the app. If you tick nobody, anyone in the group can still join.</p></div>
+    <div class="field"><label for="nTitle" data-i18n="new.what">The challenge</label><input id="nTitle" maxlength="90" data-i18n-ph="new.whatPh" placeholder="e.g. Who walks the most steps this week"></div>
+    <div class="field"><label for="nDesc" data-i18n="new.rules">Rules and how to prove it</label><textarea id="nDesc" maxlength="600" data-i18n-ph="new.rulesPh" placeholder="e.g. Screenshot from your step app on Sunday evening"></textarea></div>
+    <div class="field"><label for="nPhoto" data-i18n="photoOpt">Photo (optional)</label><input id="nPhoto" type="file" accept="image/*"></div>
+    <div class="field"><label data-i18n="new.stake">Stake per person</label>
       <div class="chips" id="stakeChips"></div>
-      <input id="nStake" class="mono" inputmode="decimal" placeholder="Altă sumă, £" aria-label="Altă sumă în lire">
+      <input id="nStake" class="mono" inputmode="decimal" data-i18n-ph="new.otherPh" placeholder="Other amount, £" data-i18n-aria="new.otherAria" aria-label="Other amount in pounds">
     </div>
-    <div class="field"><label for="nDeadline">Termen (opțional)</label><input id="nDeadline" type="date"></div>
-    <button class="btn block" type="submit" id="createBtn">Lansează challenge-ul</button>
+    <div class="field"><label for="nDeadline" data-i18n="new.deadline">Deadline (optional)</label><input id="nDeadline" type="date"></div>
+    <button class="btn block" type="submit" id="createBtn" data-i18n="new.launch">Launch challenge</button>
     <p class="formmsg" id="newMsg" role="alert"></p>
   </form>
 </section>
@@ -86,109 +95,117 @@
 <!-- detail sheet -->
 <div class="sheet" id="detail" hidden>
   <div class="wrap">
-    <button class="back" data-close>← Înapoi</button>
+    <button class="back" data-close data-i18n="back">← Back</button>
     <div id="detailBody"></div>
     <div id="proofForm" class="card stack" hidden>
-      <div class="field"><label for="pText">Dovada ta</label><textarea id="pText" maxlength="600" placeholder="Ce ai făcut, link, rezultat…"></textarea></div>
-      <div class="field"><label for="pPhoto">Poză (opțional)</label><input id="pPhoto" type="file" accept="image/*"></div>
-      <button class="btn block" id="pSend" type="button">Trimite dovada</button>
+      <div class="field"><label for="pText" data-i18n="proof.yours">Your proof</label><textarea id="pText" maxlength="600" data-i18n-ph="proof.ph" placeholder="What you did, a link, the result…"></textarea></div>
+      <div class="field"><label for="pPhoto" data-i18n="photoOpt">Photo (optional)</label><input id="pPhoto" type="file" accept="image/*"></div>
+      <button class="btn block" id="pSend" type="button">Send proof</button>
     </div>
     <div id="detailActions" class="stack"></div>
+    <div id="inviteBox" hidden>
+      <h2 data-i18n="inv.title">Invites and requests</h2>
+      <p class="note" id="windowNote" style="margin:0 0 8px"></p>
+      <div class="stack" id="inviteList"></div>
+      <div class="stack" style="margin-top:10px">
+        <button class="btn ghost block" type="button" id="inviteToggle" data-i18n="inv.inviteBtn">Invite friends</button>
+        <button class="btn block" type="button" id="requestBtn" data-i18n="inv.request">Ask to join</button>
+      </div>
+      <div id="inviteForm" class="card stack" hidden>
+        <div class="chips" id="inviteFormChips"></div>
+        <button class="btn block" type="button" id="inviteSend" data-i18n="inv.send">Send invites</button>
+      </div>
+    </div>
     <div id="offerBox" hidden>
-      <h2>Contra-oferte</h2>
+      <h2 data-i18n="offer.title">Counter-offers</h2>
       <div class="stack" id="offerList"></div>
-      <button class="btn ghost block" type="button" id="offerToggle">Fă o contra-ofertă</button>
+      <button class="btn ghost block" type="button" id="offerToggle" data-i18n="offer.make">Make a counter-offer</button>
       <form id="offerForm" class="card stack" hidden novalidate>
-        <p class="note" style="margin:0">Propune alte reguli, altă miză sau amândouă. Dacă cine a lansat acceptă, challenge-ul se schimbă și intri automat.</p>
-        <div class="field"><label for="oDescr">Regulile propuse de tine</label><textarea id="oDescr" maxlength="600" placeholder="ex: o dată la două zile"></textarea></div>
-        <div class="field"><label for="oStake">Miza propusă de persoană (£)</label><input id="oStake" class="mono" inputmode="decimal" placeholder="ex: 30"></div>
-        <button class="btn block" type="submit" id="oSend">Trimite contra-oferta</button>
+        <p class="note" style="margin:0" data-i18n="offer.help">Suggest different rules, a different stake, or both. If the creator accepts, the challenge changes and you're in automatically.</p>
+        <div class="field"><label for="oDescr" data-i18n="offer.rules">Your proposed rules</label><textarea id="oDescr" maxlength="600" data-i18n-ph="offer.rulesPh" placeholder="e.g. every other day"></textarea></div>
+        <div class="field"><label for="oStake" data-i18n="offer.stake">Proposed stake per person (£)</label><input id="oStake" class="mono" inputmode="decimal" data-i18n-ph="offer.stakePh" placeholder="e.g. 30"></div>
+        <button class="btn block" type="submit" id="oSend" data-i18n="offer.send">Send counter-offer</button>
         <p class="formmsg" id="oMsg" role="alert"></p>
       </form>
     </div>
     <div id="chatBox" hidden>
-      <h2>Chat</h2>
+      <h2 data-i18n="chat.title">Chat</h2>
       <div class="card chat" id="chatList" aria-live="polite"></div>
       <form id="chatForm" class="chatform" novalidate>
-        <input id="chatInput" maxlength="500" autocomplete="off" placeholder="Scrie un mesaj…" aria-label="Mesaj">
-        <button class="btn" type="submit" id="chatSend">Trimite</button>
+        <input id="chatInput" maxlength="500" autocomplete="off" data-i18n-ph="chat.ph" placeholder="Write a message…" data-i18n-aria="chat.aria" aria-label="Message">
+        <button class="btn" type="submit" id="chatSend" data-i18n="chat.send">Send</button>
       </form>
     </div>
-    <p class="note" id="chatLocked" hidden>Chat-ul e doar pentru cei intrați în acest challenge.</p>
+    <p class="note" id="chatLocked" hidden data-i18n="chat.locked">The chat is only for people who joined this challenge.</p>
   </div>
 </div>
 
-<!-- groups sheet -->
-<div class="sheet" id="groupsSheet" hidden>
-  <div class="wrap">
-    <button class="back" data-close>← Înapoi</button>
-    <h1 class="d-title">Grupurile mele</h1>
-    <div class="card" id="groupList"></div>
-    <div class="stack" id="groupForms"></div>
-  </div>
-</div>
-
-<!-- account sheet -->
+<!-- groups & account sheet (opened from the group selector) -->
 <div class="sheet" id="account" hidden>
   <div class="wrap">
-    <button class="back" data-close>← Înapoi</button>
-    <h1 class="d-title" id="accTitle">Contul meu</h1>
-    <div class="card stack">
-      <h2 style="margin:0">Invită prieteni în grup</h2>
-      <p class="note" style="margin:0">Trimite-le linkul și codul de mai jos. Își fac cont, apoi intră cu codul.</p>
-      <div class="codebox"><span class="mono" id="inviteCode">…</span><button class="btn sm ghost" type="button" id="copyInvite">Copiază invitația</button></div>
+    <button class="back" data-close data-i18n="back">← Back</button>
+    <h1 class="d-title" data-i18n="groups.mine">My groups</h1>
+    <div class="card" id="accGroupList"></div>
+    <div class="card stack" style="margin-top:12px">
+      <h2 style="margin:0" id="inviteTitle">Invite friends to the group</h2>
+      <p class="note" style="margin:0" data-i18n="invite.help">Send them the link and the code below. They create an account, then join with the code.</p>
+      <div class="codebox"><span class="mono" id="inviteCode">…</span><button class="btn sm ghost" type="button" id="copyInvite" data-i18n="invite.copy">Copy invite</button></div>
       <div id="adminTools" class="stack" hidden>
-        <button class="btn ghost block" type="button" id="newCodeBtn">Generează cod nou</button>
-        <p class="note" style="margin:0">Codul vechi nu mai merge după schimbare. Cine e deja în grup rămâne.</p>
+        <button class="btn ghost block" type="button" id="newCodeBtn" data-i18n="invite.newCode">Generate new code</button>
+        <p class="note" style="margin:0" data-i18n="invite.newCodeNote">The old code stops working. Everyone already in the group stays.</p>
         <form id="renameForm" class="stack" novalidate>
-          <div class="field"><label for="grpRename">Numele grupului</label><input id="grpRename" maxlength="40"></div>
-          <button class="btn ghost block" type="submit">Salvează numele grupului</button>
+          <div class="field"><label for="grpRename" data-i18n="group.name">Group name</label><input id="grpRename" maxlength="40"></div>
+          <button class="btn ghost block" type="submit" data-i18n="group.saveName">Save group name</button>
         </form>
       </div>
     </div>
-    <h2>Grupurile mele</h2>
-    <div class="card" id="accGroupList"></div>
-    <div class="stack" id="accGroupForms"></div>
-    <h2>Contul meu</h2>
+    <div class="stack" id="accGroupForms" style="margin-top:12px"></div>
+    <h2 data-i18n="account.mine">My account</h2>
     <div class="card stack">
       <p class="muted" id="accEmail" style="margin:0"></p>
       <form id="nickForm" class="stack" novalidate>
-        <div class="field"><label for="accNick">Numele tău în acest grup</label><input id="accNick" maxlength="24"></div>
-        <button class="btn ghost block" type="submit">Salvează numele</button>
+        <div class="field"><label for="accNick" data-i18n="account.nick">Your name in this group</label><input id="accNick" maxlength="24"></div>
+        <button class="btn ghost block" type="submit" data-i18n="account.saveNick">Save name</button>
       </form>
+      <div class="field"><label data-i18n="lang.label">Language</label>
+        <div class="seg" role="group">
+          <button type="button" data-lang="en" aria-pressed="true"><strong>English</strong></button>
+          <button type="button" data-lang="ro" aria-pressed="false"><strong>Română</strong></button>
+        </div>
+      </div>
     </div>
     <div class="stack">
-      <button class="btn warn block" type="button" data-logout>Ieși din cont</button>
+      <button class="btn warn block" type="button" data-logout data-i18n="signOut">Sign out</button>
     </div>
   </div>
 </div>
 
 <nav id="nav" hidden><div class="inner">
-  <button data-tab="list" aria-current="page">Challenge-uri</button>
-  <button data-tab="new">+ Nou</button>
-  <button data-tab="ledger">Socoteala</button>
+  <button data-tab="list" aria-current="page" data-i18n="nav.list">Challenges</button>
+  <button data-tab="new" data-i18n="nav.new">+ New</button>
+  <button data-tab="ledger" data-i18n="nav.ledger">Money</button>
 </div></nav>
 
 <template id="groupFormsTpl">
   <form class="card stack" data-form="join" novalidate>
-    <h2 style="margin:0">Intră într-un grup</h2>
-    <div class="field"><label>Cod de invitație<input name="code" autocapitalize="characters" autocomplete="off" placeholder="ex: POT-ABC123"></label></div>
-    <div class="field"><label>Cum te strigă în grup?<input name="nick" maxlength="24" autocomplete="nickname" placeholder="ex: Mihai"></label></div>
-    <button class="btn block" type="submit">Intră în grup</button>
+    <h2 style="margin:0" data-i18n="form.join">Join a group</h2>
+    <div class="field"><label><span data-i18n="form.code">Invite code</span><input name="code" autocapitalize="characters" autocomplete="off" data-i18n-ph="form.codePh" placeholder="e.g. POT-ABC123"></label></div>
+    <div class="field"><label><span data-i18n="form.nick">Your name in the group</span><input name="nick" maxlength="24" autocomplete="nickname" data-i18n-ph="form.nickPh" placeholder="e.g. Mike"></label></div>
+    <button class="btn block" type="submit" data-i18n="form.joinBtn">Join group</button>
     <p class="formmsg" role="alert"></p>
   </form>
   <form class="card stack" data-form="create" novalidate>
-    <h2 style="margin:0">Fă un grup nou</h2>
-    <div class="field"><label>Numele grupului<input name="name" maxlength="40" placeholder="ex: Fotbal de joi"></label></div>
-    <div class="field"><label>Cum te strigă în grup?<input name="nick" maxlength="24" autocomplete="nickname" placeholder="ex: Lucian"></label></div>
-    <button class="btn ghost block" type="submit">Creează grupul</button>
-    <p class="note" style="margin:0">Primești un cod pe care îl trimiți prietenilor.</p>
+    <h2 style="margin:0" data-i18n="form.create">Create a new group</h2>
+    <div class="field"><label><span data-i18n="group.name">Group name</span><input name="name" maxlength="40" data-i18n-ph="form.namePh" placeholder="e.g. Thursday football"></label></div>
+    <div class="field"><label><span data-i18n="form.nick">Your name in the group</span><input name="nick" maxlength="24" autocomplete="nickname" data-i18n-ph="form.nickPh2" placeholder="e.g. Lucian"></label></div>
+    <button class="btn ghost block" type="submit" data-i18n="form.createBtn">Create group</button>
+    <p class="note" style="margin:0" data-i18n="form.createNote">You'll get a code to send to your friends.</p>
     <p class="formmsg" role="alert"></p>
   </form>
 </template>
 
-<script src="config.js?v=28d6d21"></script>
+<script src="config.js?v=20261008-6"></script>
 <script src="vendor/supabase-2.117.0.js"></script>
-<script src="app.js?v=28d6d21"></script>
+<script src="app.js?v=20261008-6"></script>
 </body>
 </html>
