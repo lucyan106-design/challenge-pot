@@ -45,7 +45,7 @@
       "form.nick": "Your name in the group", "form.nickPh": "e.g. Mike", "form.joinBtn": "Join group",
       "form.create": "Create a new group", "form.namePh": "e.g. Thursday football", "form.nickPh2": "e.g. Lucian",
       "form.createBtn": "Create group", "form.createNote": "You'll get a code to send to your friends.",
-      "aria.switchGroup": "Switch group", "aria.account": "My account and groups",
+      "aria.account": "My account", "gm.manage": "Invite code & my groups", "gm.new": "+ New group / join with a code", "aria.switchGroup": "Switch group",
 
       "status.open": "Collecting stakes", "status.active": "In progress", "status.voting": "Voting",
       "status.settled": "Closed", "status.cancelled": "Cancelled",
@@ -196,7 +196,7 @@
       "form.nick": "Cum te strigă în grup?", "form.nickPh": "ex: Mihai", "form.joinBtn": "Intră în grup",
       "form.create": "Fă un grup nou", "form.namePh": "ex: Fotbal de joi", "form.nickPh2": "ex: Lucian",
       "form.createBtn": "Creează grupul", "form.createNote": "Primești un cod pe care îl trimiți prietenilor.",
-      "aria.switchGroup": "Schimbă grupul", "aria.account": "Contul meu și grupurile mele",
+      "aria.account": "Contul meu", "gm.manage": "Cod de invitație și grupurile mele", "gm.new": "+ Grup nou / intră cu un cod", "aria.switchGroup": "Schimbă grupul",
 
       "status.open": "Se strâng mizele", "status.active": "În desfășurare", "status.voting": "La vot",
       "status.settled": "Închis", "status.cancelled": "Anulat",

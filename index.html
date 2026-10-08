@@ -16,16 +16,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="style.css?v=20261008-8">
-<script src="i18n.js?v=20261008-8"></script>
+<link rel="stylesheet" href="style.css?v=20261008-9">
+<script src="i18n.js?v=20261008-9"></script>
 </head>
 <body>
 <header id="topbar">
+  <button class="me" id="meBtn" hidden data-i18n-aria="aria.account" aria-label="My account"></button>
+  <div class="grpwrap">
+    <button class="grp" id="grpBtn" hidden aria-haspopup="true" aria-expanded="false" data-i18n-aria="aria.switchGroup" aria-label="Switch group"><span id="grpName"></span><span aria-hidden="true">▾</span></button>
+    <div class="grpmenu" id="grpMenu" hidden></div>
+  </div>
   <div class="brand">Challenge <b>Pot</b></div>
   <div class="langsw" id="langTop" role="group" aria-label="Language">
     <button type="button" data-lang="en" aria-pressed="true">EN</button><button type="button" data-lang="ro" aria-pressed="false">RO</button>
   </div>
-  <button class="grp" id="grpBtn" hidden data-i18n-aria="aria.switchGroup" aria-label="Switch group"><span id="grpName"></span><span aria-hidden="true">▾</span></button>
 </header>
 
 <main class="wrap" id="loading">
@@ -144,6 +148,7 @@
 <div class="sheet" id="account" hidden>
   <div class="wrap">
     <button class="back" data-close data-i18n="back">← Back</button>
+    <div id="accGroupsPart">
     <h1 class="d-title" data-i18n="groups.mine">My groups</h1>
     <div class="card" id="accGroupList"></div>
     <div class="card stack" style="margin-top:12px">
@@ -160,7 +165,9 @@
       </div>
     </div>
     <div class="stack" id="accGroupForms" style="margin-top:12px"></div>
-    <h2 data-i18n="account.mine">My account</h2>
+    </div>
+    <div id="accMePart">
+    <h1 class="d-title" data-i18n="account.mine">My account</h1>
     <div class="card stack">
       <p class="muted" id="accEmail" style="margin:0"></p>
       <form id="nickForm" class="stack" novalidate>
@@ -176,6 +183,7 @@
     </div>
     <div class="stack">
       <button class="btn warn block" type="button" data-logout data-i18n="signOut">Sign out</button>
+    </div>
     </div>
   </div>
 </div>
@@ -204,8 +212,8 @@
   </form>
 </template>
 
-<script src="config.js?v=20261008-8"></script>
+<script src="config.js?v=20261008-9"></script>
 <script src="vendor/supabase-2.117.0.js"></script>
-<script src="app.js?v=20261008-8"></script>
+<script src="app.js?v=20261008-9"></script>
 </body>
 </html>

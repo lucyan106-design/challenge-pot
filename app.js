@@ -50,7 +50,10 @@
     const inGroup = ["tabList", "tabNew", "tabLedger"].includes(view);
     $("nav").hidden = !inGroup;
     $("grpBtn").hidden = !inGroup;
+    $("meBtn").hidden = !inGroup;
+    $("topbar").classList.toggle("ingroup", inGroup);
     $("langTop").hidden = inGroup;
+    if (!inGroup) closeGrpMenu();
   }
   function go(tab) {
     S.tab = tab;
@@ -408,7 +411,17 @@
     try { await loadDetail(id); } catch {}
     renderDetail(true);
   }
-  function closeSheets() { S.openId = null; $("detail").hidden = true; $("account").hidden = true; }
+  function closeSheets() { S.openId = null; $("detail").hidden = true; $("account").hidden = true; closeGrpMenu(); }
+  function closeGrpMenu() { $("grpMenu").hidden = true; $("grpBtn").setAttribute("aria-expanded", "false"); }
+  function renderGrpMenu() {
+    $("grpMenu").innerHTML = S.groups.map(g => `<button type="button" class="gmi" data-switch="${esc(g.id)}" aria-current="${g.id === S.gid}"><span class="nm">${esc(g.name)}</span>${g.id === S.gid ? `<span class="tick" aria-hidden="true">✓</span>` : ""}</button>`).join("")
+      + `<div class="gmsep"></div><button type="button" class="gmi act" data-gm="manage">${esc(t("gm.manage"))}</button><button type="button" class="gmi act" data-gm="new">${esc(t("gm.new"))}</button>`;
+  }
+  function toggleGrpMenu() {
+    const open = $("grpMenu").hidden;
+    if (open) renderGrpMenu();
+    $("grpMenu").hidden = !open; $("grpBtn").setAttribute("aria-expanded", String(open));
+  }
 
   function renderChat(c, scroll) {
     const player = isPlayer(c, S.me);
@@ -587,8 +600,14 @@
   }
 
   // ---------- account ----------
-  async function openAccount() {
+  async function openAccount(mode = "groups") {
+    closeGrpMenu();
+    $("accGroupsPart").hidden = mode === "me";
+    $("accMePart").hidden = mode !== "me";
     $("account").hidden = false; renderAccount();
+    window.scrollTo(0, 0); $("account").scrollTop = 0;
+    if (mode === "new") { const f = $("accGroupForms"); setTimeout(() => f.scrollIntoView({ block: "start" }), 0); }
+    if (mode === "me") return;
     const { data, error } = await sb.rpc("get_invite_code", { p_group: S.gid });
     $("inviteCode").textContent = error ? "—" : data;
   }
@@ -605,6 +624,9 @@
   function renderTop() {
     const g = curGroup();
     $("grpName").textContent = g ? g.name : "";
+    const nick = (S.members[S.me] && S.members[S.me].nick) || (g && g.nick) || "";
+    $("meBtn").innerHTML = `<span class="av" style="background:${colorOf(S.me)}" aria-hidden="true">${esc(nick.trim().charAt(0) || "?")}</span><span class="menick">${esc(nick)}</span>`;
+    if (!$("grpMenu").hidden) renderGrpMenu();
   }
   function renderAll() {
     if (!S.me) return;
@@ -742,7 +764,8 @@
     else if (b.dataset.tab) { closeSheets(); go(b.dataset.tab); }
     else if (b.dataset.act) act(b.dataset.act);
     else if (b.dataset.close !== undefined) closeSheets();
-    else if (b.dataset.switch) switchGroup(b.dataset.switch);
+    else if (b.dataset.switch) { closeGrpMenu(); switchGroup(b.dataset.switch); }
+    else if (b.dataset.gm) openAccount(b.dataset.gm);
     else if (b.dataset.kind) setKind(b.dataset.kind);
     else if (b.dataset.logout !== undefined) { unsubscribe(); await sb.auth.signOut(); }
     else if (b.dataset.month) { S.month = b.dataset.month; renderLedger(); window.scrollTo(0, 0); }
@@ -776,7 +799,10 @@
     if (S.me && S.gid && S.loaded) renderAll();
   });
 
-  $("grpBtn").onclick = openAccount;
+  $("grpBtn").onclick = (e) => { e.stopPropagation(); toggleGrpMenu(); };
+  $("meBtn").onclick = () => openAccount("me");
+  document.addEventListener("click", (e) => { if (!$("grpMenu").hidden && !e.target.closest(".grpwrap")) closeGrpMenu(); }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("grpMenu").hidden) { closeGrpMenu(); $("grpBtn").focus(); } });
   $("copyInvite").onclick = async () => {
     const g = curGroup();
     const text = t("invite.text", { group: g ? g.name : "", url: location.origin + location.pathname.replace(/index\.html$/, ""), code: $("inviteCode").textContent });
