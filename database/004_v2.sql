@@ -1,59 +1,57 @@
--- Challenge Pot — update: challenge a friend, dated proofs, invites & join requests (004 + 005 + 006)
--- Paste everything into Supabase → SQL Editor → New query → Run. Safe to run once.
-begin;
+-- =====================================================================
+-- Challenge Pot — migration 004 (v2): challenge a friend, dated proof log, invites & join requests
+-- Additive only (nothing is removed), so it can be applied while the old app is live.
+-- "Challenge a friend" is stored as kind 'personal' with a target; public._kind(c) returns 'dare'.
+-- =====================================================================
 alter table public.challenges add column if not exists target uuid references auth.users(id) on delete cascade;
-alter table public.challenges drop constraint if exists challenges_kind_check;
-alter table public.challenges add constraint challenges_kind_check check (kind in ('duel','personal','dare'));
+
+create or replace function public._kind(c public.challenges)
+returns text language sql immutable set search_path = ''
+as $$ select case when c.target is not null then 'dare' else c.kind end $$;
 create or replace function public._doer(c public.challenges)
 returns uuid language sql immutable set search_path = ''
-as $$ select case when c.kind = 'dare' then c.target else c.creator end $$;
+as $$ select case when c.target is not null then c.target else c.creator end $$;
 create or replace function public._is_player(c public.challenges, uid uuid)
 returns boolean language sql immutable set search_path = ''
 as $$ select case when c.kind = 'duel' then uid = any(c.participants)
-                  when c.kind = 'dare' then uid = c.target or uid = any(c.backers)
+                  when c.target is not null then uid = c.target or uid = any(c.backers)
                   else uid = c.creator or uid = any(c.backers) end $$;
-drop function if exists public.create_challenge(uuid, text, text, text, numeric, date, text);
-create or replace function public.create_challenge(p_group uuid, p_title text, p_descr text, p_kind text, p_stake numeric,
-                                                   p_deadline date, p_photo_path text default null, p_target uuid default null)
-returns uuid language plpgsql security definer set search_path = ''
-as $$
-declare uid uuid := public._require_group_member(p_group); new_id uuid;
-begin
-  if p_kind not in ('duel','personal','dare') then raise exception 'Tip necunoscut.' using errcode = '22023'; end if;
-  if char_length(btrim(coalesce(p_title,''))) not between 1 and 90 then
-    raise exception 'Scrie provocarea (maxim 90 de caractere).' using errcode = '22023';
+
+-- every proof is kept, stamped with the server's date and time
+create table if not exists public.proof_log (
+  id           uuid primary key default gen_random_uuid(),
+  challenge_id uuid not null references public.challenges(id) on delete cascade,
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  body         text not null default '' check (char_length(body) <= 600),
+  photo_path   text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists proof_log_idx on public.proof_log (challenge_id, created_at desc);
+alter table public.proof_log enable row level security;
+create policy "group reads proof log" on public.proof_log for select to authenticated
+  using (exists (select 1 from public.challenges c where c.id = challenge_id and public.is_group_member(c.group_id)));
+grant select on public.proof_log to authenticated;
+insert into public.proof_log (challenge_id, user_id, body, photo_path, created_at)
+select p.challenge_id, p.user_id, p.body, p.photo_path, p.updated_at from public.proofs p
+where not exists (select 1 from public.proof_log l where l.challenge_id = p.challenge_id and l.user_id = p.user_id and l.created_at = p.updated_at);
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'proof_log') then
+    alter publication supabase_realtime add table public.proof_log;
   end if;
-  if p_stake is null or p_stake < 0.5 or p_stake > 1000 then
-    raise exception 'Miza trebuie să fie între £0.50 și £1000.' using errcode = '22023';
-  end if;
-  if p_photo_path is not null and split_part(p_photo_path, '/', 1) <> uid::text then
-    raise exception 'Poză invalidă.' using errcode = '22023';
-  end if;
-  if p_kind = 'dare' then
-    if p_target is null or p_target = uid
-       or not exists (select 1 from public.group_members where group_id = p_group and user_id = p_target) then
-      raise exception 'Alege un prieten din grup.' using errcode = '22023';
-    end if;
-  end if;
-  insert into public.challenges (group_id, title, descr, kind, stake, creator, participants, backers, deadline, photo_path, target)
-  values (p_group, btrim(p_title), left(coalesce(btrim(p_descr),''), 600), p_kind, round(p_stake, 2), uid,
-          case when p_kind = 'duel' then array[uid] else '{}'::uuid[] end,
-          case when p_kind = 'dare' then array[uid] else '{}'::uuid[] end,
-          p_deadline, p_photo_path, case when p_kind = 'dare' then p_target end)
-  returning id into new_id;
-  return new_id;
 end $$;
+
+alter table public.challenges add column if not exists target uuid references auth.users(id) on delete cascade;
 create or replace function public.join_challenge(p_id uuid)
 returns void language plpgsql security definer set search_path = ''
 as $$
 declare uid uuid := public._uid(); c public.challenges := public._challenge_for_update(p_id);
 begin
   if c.status <> 'open' then raise exception 'Nu se mai poate intra, challenge-ul a pornit.' using errcode = '22023'; end if;
-  if c.kind = 'duel' then
+  if public._kind(c) = 'duel' then
     if not uid = any(c.participants) then
       update public.challenges set participants = array_append(participants, uid) where id = p_id;
     end if;
-  elsif c.kind = 'dare' then
+  elsif public._kind(c) = 'dare' then
     if uid = c.target then
       update public.challenges set participants = array[uid] where id = p_id;
     elsif not uid = any(c.backers) then
@@ -84,13 +82,13 @@ declare uid uuid := public._uid(); c public.challenges := public._challenge_for_
 begin
   if c.creator <> uid then raise exception 'Doar cine a lansat challenge-ul îl poate porni.' using errcode = '42501'; end if;
   if c.status <> 'open' then raise exception 'Challenge-ul a pornit deja.' using errcode = '22023'; end if;
-  if c.kind = 'duel' and coalesce(array_length(c.participants,1),0) < 2 then
+  if public._kind(c) = 'duel' and coalesce(array_length(c.participants,1),0) < 2 then
     raise exception 'Ai nevoie de cel puțin încă un participant.' using errcode = '22023';
   end if;
-  if c.kind = 'personal' and coalesce(array_length(c.backers,1),0) < 1 then
+  if public._kind(c) = 'personal' and coalesce(array_length(c.backers,1),0) < 1 then
     raise exception 'Ai nevoie de cel puțin un prieten care pariază contra.' using errcode = '22023';
   end if;
-  if c.kind = 'dare' and not c.target = any(c.participants) then
+  if public._kind(c) = 'dare' and not c.target = any(c.participants) then
     raise exception 'Prietenul provocat trebuie să accepte întâi.' using errcode = '22023';
   end if;
   update public.challenges set status = 'active', started_at = now() where id = p_id;
@@ -100,38 +98,15 @@ returns void language plpgsql security definer set search_path = ''
 as $$
 declare uid uuid := public._uid(); c public.challenges := public._challenge_for_update(p_id);
 begin
-  if c.creator <> uid and not (c.kind = 'dare' and c.target = uid) then
+  if c.creator <> uid and not (public._kind(c) = 'dare' and c.target = uid) then
     raise exception 'Doar cine a lansat challenge-ul îl poate anula.' using errcode = '42501';
   end if;
   if c.status <> 'open' then raise exception 'Se poate anula doar înainte de pornire.' using errcode = '22023'; end if;
   update public.challenges set status = 'cancelled' where id = p_id;
 end $$;
-create or replace function public.submit_proof(p_id uuid, p_body text, p_photo_path text)
-returns void language plpgsql security definer set search_path = ''
-as $$
-declare uid uuid := public._uid(); c public.challenges;
-begin
-  select * into c from public.challenges where id = p_id;
-  if not found then raise exception 'Challenge-ul nu există.' using errcode = '22023'; end if;
-  perform public._require_group_member(c.group_id);
-  if c.status <> 'active' then raise exception 'Dovezile se trimit cât timp challenge-ul e în desfășurare.' using errcode = '22023'; end if;
-  if (c.kind = 'duel' and not uid = any(c.participants)) or (c.kind <> 'duel' and uid <> public._doer(c)) then
-    raise exception 'Doar cine face provocarea trimite dovezi.' using errcode = '42501';
-  end if;
-  if char_length(btrim(coalesce(p_body,''))) = 0 and p_photo_path is null then
-    raise exception 'Scrie ceva sau adaugă o poză.' using errcode = '22023';
-  end if;
-  if p_photo_path is not null and split_part(p_photo_path, '/', 1) <> uid::text then
-    raise exception 'Poză invalidă.' using errcode = '22023';
-  end if;
-  insert into public.proofs (challenge_id, user_id, body, photo_path, updated_at)
-  values (p_id, uid, left(btrim(coalesce(p_body,'')), 600), p_photo_path, now())
-  on conflict (challenge_id, user_id) do update
-    set body = excluded.body, photo_path = coalesce(excluded.photo_path, public.proofs.photo_path), updated_at = now();
-end $$;
 create or replace function public._eligible_voters(c public.challenges)
 returns int language sql stable security definer set search_path = ''
-as $$ select (count(*) - case when c.kind in ('personal','dare') then 1 else 0 end)::int
+as $$ select (count(*) - case when public._kind(c) in ('personal','dare') then 1 else 0 end)::int
       from public.group_members where group_id = c.group_id $$;
 revoke execute on function public._eligible_voters(public.challenges) from authenticated;
 create or replace function public.cast_vote(p_id uuid, p_pick text)
@@ -143,7 +118,7 @@ begin
   if not found then raise exception 'Challenge-ul nu există.' using errcode = '22023'; end if;
   perform public._require_group_member(c.group_id);
   if c.status <> 'voting' then raise exception 'Votul nu e deschis.' using errcode = '22023'; end if;
-  if c.kind in ('personal','dare') then
+  if public._kind(c) in ('personal','dare') then
     if uid = public._doer(c) then raise exception 'Nu poți vota la propria provocare.' using errcode = '42501'; end if;
     if p_pick not in ('success','fail') then raise exception 'Vot invalid.' using errcode = '22023'; end if;
   else
@@ -169,7 +144,7 @@ begin
   if cast_count < need then
     raise exception 'Mai trebuie % vot(uri) ca să se poată închide.', need - cast_count using errcode = '22023';
   end if;
-  if c.kind in ('personal','dare') then
+  if public._kind(c) in ('personal','dare') then
     select count(*) filter (where pick = 'success'), count(*) filter (where pick = 'fail') into ok, ko
       from public.votes where challenge_id = p_id;
     res := jsonb_build_object('success', ok > ko);
@@ -200,10 +175,10 @@ begin
     descr        = coalesce(o.descr, descr),
     stake        = coalesce(o.stake, stake),
     participants = case when kind = 'duel' then array[creator, o.proposer]
-                        when kind = 'dare' then case when o.proposer = target then array[target] else '{}'::uuid[] end
+                        when target is not null then case when o.proposer = target then array[target] else '{}'::uuid[] end
                         else participants end,
-    backers      = case when kind = 'personal' then array[o.proposer]
-                        when kind = 'dare' then case when o.proposer = target then array[creator] else array[creator, o.proposer] end
+    backers      = case when kind = 'personal' and target is null then array[o.proposer]
+                        when target is not null then case when o.proposer = target then array[creator] else array[creator, o.proposer] end
                         else backers end
   where id = c.id;
   update public.challenge_offers set status = 'accepted', decided_at = now() where id = p_offer;
@@ -222,14 +197,6 @@ begin
   end loop;
 end $$;
 
-alter table public.proofs add column if not exists id uuid not null default gen_random_uuid();
-alter table public.proofs add column if not exists created_at timestamptz;
-update public.proofs set created_at = updated_at where created_at is null;
-alter table public.proofs alter column created_at set not null;
-alter table public.proofs alter column created_at set default now();
-alter table public.proofs drop constraint if exists proofs_pkey;
-alter table public.proofs add primary key (id);
-create index if not exists proofs_challenge_idx on public.proofs (challenge_id, created_at desc);
 create or replace function public.submit_proof(p_id uuid, p_body text, p_photo_path text)
 returns void language plpgsql security definer set search_path = ''
 as $$
@@ -239,7 +206,7 @@ begin
   if not found then raise exception 'Challenge-ul nu există.' using errcode = '22023'; end if;
   perform public._require_group_member(c.group_id);
   if c.status <> 'active' then raise exception 'Dovezile se trimit cât timp challenge-ul e în desfășurare.' using errcode = '22023'; end if;
-  if (c.kind = 'duel' and not uid = any(c.participants)) or (c.kind <> 'duel' and uid <> public._doer(c)) then
+  if (public._kind(c) = 'duel' and not uid = any(c.participants)) or (public._kind(c) <> 'duel' and uid <> public._doer(c)) then
     raise exception 'Doar cine face provocarea trimite dovezi.' using errcode = '42501';
   end if;
   if char_length(btrim(coalesce(p_body,''))) = 0 and p_photo_path is null then
@@ -248,11 +215,11 @@ begin
   if p_photo_path is not null and split_part(p_photo_path, '/', 1) <> uid::text then
     raise exception 'Poză invalidă.' using errcode = '22023';
   end if;
-  if (select count(*) from public.proofs where user_id = uid and created_at > now() - interval '1 hour') >= 20 then
+  if (select count(*) from public.proof_log where user_id = uid and created_at > now() - interval '1 hour') >= 20 then
     raise exception 'Prea multe dovezi într-o oră. Așteaptă puțin.' using errcode = '22023';
   end if;
-  insert into public.proofs (id, challenge_id, user_id, body, photo_path, created_at, updated_at)
-  values (gen_random_uuid(), p_id, uid, left(btrim(coalesce(p_body,'')), 600), p_photo_path, now(), now());
+  insert into public.proof_log (challenge_id, user_id, body, photo_path)
+  values (p_id, uid, left(btrim(coalesce(p_body,'')), 600), p_photo_path);
 end $$;
 revoke all on function public.submit_proof(uuid, text, text) from public, anon;
 grant execute on function public.submit_proof(uuid, text, text) to authenticated;
@@ -271,7 +238,6 @@ create index if not exists challenge_invites_idx on public.challenge_invites (ch
 create index if not exists challenge_invites_user_idx on public.challenge_invites (user_id, status);
 create unique index if not exists challenge_invites_one_pending on public.challenge_invites (challenge_id, user_id) where status = 'pending';
 alter table public.challenge_invites enable row level security;
-drop policy if exists "group reads invites" on public.challenge_invites;
 create policy "group reads invites" on public.challenge_invites for select to authenticated
   using (exists (select 1 from public.challenges c where c.id = challenge_id and public.is_group_member(c.group_id)));
 grant select on public.challenge_invites to authenticated;
@@ -291,7 +257,7 @@ as $$
 declare c public.challenges;
 begin
   select * into c from public.challenges where id = p_id for update;
-  if c.kind = 'duel' then
+  if public._kind(c) = 'duel' then
     if not p_user = any(c.participants) then
       update public.challenges set participants = array_append(participants, p_user) where id = p_id;
     end if;
@@ -309,7 +275,7 @@ declare c public.challenges; u uuid; n int := 0;
 begin
   select * into c from public.challenges where id = p_id;
   foreach u in array coalesce(p_users, '{}'::uuid[]) loop
-    continue when u = p_by or public._is_player(c, u) or (c.kind = 'dare' and u = c.target);
+    continue when u = p_by or public._is_player(c, u) or (public._kind(c) = 'dare' and u = c.target);
     continue when not exists (select 1 from public.group_members where group_id = c.group_id and user_id = u);
     continue when exists (select 1 from public.challenge_invites where challenge_id = p_id and user_id = u and status = 'pending');
     insert into public.challenge_invites (challenge_id, user_id, kind, created_by) values (p_id, u, 'invite', p_by);
@@ -381,11 +347,11 @@ as $$
 declare uid uuid := public._uid(); c public.challenges := public._challenge_for_update(p_id);
 begin
   if c.status <> 'open' then raise exception 'Nu se mai poate intra, challenge-ul a pornit.' using errcode = '22023'; end if;
-  if c.kind = 'duel' then
+  if public._kind(c) = 'duel' then
     if not uid = any(c.participants) then
       update public.challenges set participants = array_append(participants, uid) where id = p_id;
     end if;
-  elsif c.kind = 'dare' then
+  elsif public._kind(c) = 'dare' then
     if uid = c.target then
       update public.challenges set participants = array[uid] where id = p_id;
     elsif not uid = any(c.backers) then
@@ -400,8 +366,7 @@ begin
   update public.challenge_invites set status = 'accepted', decided_at = now()
    where challenge_id = p_id and user_id = uid and status = 'pending';
 end $$;
-drop function if exists public.create_challenge(uuid, text, text, text, numeric, date, text, uuid);
-create or replace function public.create_challenge(p_group uuid, p_title text, p_descr text, p_kind text, p_stake numeric,
+create or replace function public.create_challenge_v2(p_group uuid, p_title text, p_descr text, p_kind text, p_stake numeric,
                                                    p_deadline date, p_photo_path text default null, p_target uuid default null,
                                                    p_invite uuid[] default null)
 returns uuid language plpgsql security definer set search_path = ''
@@ -429,7 +394,7 @@ begin
   end if;
   if coalesce(array_length(p_invite, 1), 0) > 50 then raise exception 'Prea multe invitații.' using errcode = '22023'; end if;
   insert into public.challenges (group_id, title, descr, kind, stake, creator, participants, backers, deadline, photo_path, target)
-  values (p_group, btrim(p_title), left(coalesce(btrim(p_descr),''), 600), p_kind, round(p_stake, 2), uid,
+  values (p_group, btrim(p_title), left(coalesce(btrim(p_descr),''), 600), case when p_kind = 'dare' then 'personal' else p_kind end, round(p_stake, 2), uid,
           case when p_kind = 'duel' then array[uid] else '{}'::uuid[] end,
           case when p_kind = 'dare' then array[uid] else '{}'::uuid[] end,
           p_deadline, p_photo_path, case when p_kind = 'dare' then p_target end)
@@ -442,7 +407,7 @@ returns void language plpgsql security definer set search_path = ''
 as $$
 declare uid uuid := public._uid(); c public.challenges := public._challenge_for_update(p_id);
 begin
-  if c.creator <> uid and not (c.kind = 'dare' and c.target = uid) then
+  if c.creator <> uid and not (public._kind(c) = 'dare' and c.target = uid) then
     raise exception 'Doar cine a lansat challenge-ul îl poate anula.' using errcode = '42501';
   end if;
   if c.status <> 'open' then raise exception 'Se poate anula doar înainte de pornire.' using errcode = '22023'; end if;
@@ -470,6 +435,7 @@ do $$ begin
   end if;
 end $$;
 
-commit;
-
-select 'OK' as rezultat, (select count(*) from pg_proc where proname in ('request_join','respond_join','_doer','join_window_end')) as functii_noi, (select count(*) from public.challenges) as challenges, (select count(*) from public.proofs) as dovezi;
+revoke all on function public._kind(public.challenges) from public, anon;
+grant execute on function public._kind(public.challenges) to authenticated;
+revoke all on function public.create_challenge_v2(uuid, text, text, text, numeric, date, text, uuid, uuid[]) from public, anon;
+grant execute on function public.create_challenge_v2(uuid, text, text, text, numeric, date, text, uuid, uuid[]) to authenticated;

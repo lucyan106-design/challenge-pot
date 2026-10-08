@@ -126,11 +126,16 @@
     for (const p of S.payments) { if (month && paymentMonth(p) !== month) continue; add(p.from_id, Number(p.amount)); add(p.to_id, -Number(p.amount)); }
     return bal;
   }
+  // every month from the group's first activity up to now (newest first)
   function ledgerMonths() {
-    const set = new Set([thisMonth()]);
-    S.challenges.forEach(c => { const k = challengeMonth(c); if (k && transfersFor(c).length) set.add(k); });
-    S.payments.forEach(p => set.add(paymentMonth(p)));
-    return [...set].sort().reverse();
+    const keys = [thisMonth()];
+    Object.values(S.members).forEach(m => m.joined_at && keys.push(monthKey(m.joined_at)));
+    S.challenges.forEach(c => { keys.push(monthKey(c.created_at)); const k = challengeMonth(c); if (k) keys.push(k); });
+    S.payments.forEach(p => keys.push(paymentMonth(p)));
+    const first = keys.sort()[0], out = [];
+    let [y, m] = thisMonth().split("-").map(Number);
+    while (true) { const k = y + "-" + pad(m); out.push(k); if (k <= first || out.length > 120) break; m--; if (!m) { m = 12; y--; } }
+    return out;
   }
   function simplify(bal) {
     const debt = [], cred = [];
@@ -187,7 +192,7 @@
     if (!S.gid) { S.loaded = true; renderStart(); return; }
     const gid = S.gid;
     const [m, c, p, iv] = await Promise.all([
-      sb.from("group_members").select("user_id,nick,is_admin").eq("group_id", gid),
+      sb.from("group_members").select("user_id,nick,is_admin,joined_at").eq("group_id", gid),
       sb.from("challenges").select("*").eq("group_id", gid).order("created_at", { ascending: false }),
       sb.from("payments").select("*").eq("group_id", gid).order("created_at", { ascending: false }),
       sb.from("challenge_invites").select("*").eq("status", "pending").order("created_at", { ascending: true })
@@ -197,7 +202,8 @@
     if (err) { banner(errText(err)); return; }
     clearBanner();
     S.members = {}; (m.data || []).forEach(r => { S.members[r.user_id] = r; });
-    S.challenges = c.data || []; S.payments = p.data || [];
+    S.challenges = (c.data || []).map(x => x.target ? { ...x, kind: "dare" } : x);   // "challenge a friend" = personal + target
+    S.payments = p.data || [];
     const ids = new Set(S.challenges.map(x => x.id));
     S.invites = (iv && !iv.error ? iv.data || [] : []).filter(r => ids.has(r.challenge_id));
     await signPhotos(S.challenges.map(x => x.photo_path));
@@ -217,7 +223,7 @@
     const c = S.challenges.find(x => x.id === id);
     const player = c ? isPlayer(c, S.me) : false;
     const [p, v, msg, off] = await Promise.all([
-      sb.from("proofs").select("*").eq("challenge_id", id),
+      sb.from("proof_log").select("*").eq("challenge_id", id),
       sb.from("votes").select("*").eq("challenge_id", id),
       player ? sb.from("challenge_messages").select("*").eq("challenge_id", id).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
       sb.from("challenge_offers").select("*").eq("challenge_id", id).order("created_at", { ascending: true })
@@ -235,7 +241,7 @@
   function subscribe() {
     if (S.channel) return;
     let ch = sb.channel("pot");
-    for (const tb of ["groups", "group_members", "challenges", "proofs", "votes", "payments", "challenge_messages", "challenge_offers", "challenge_invites"]) {
+    for (const tb of ["groups", "group_members", "challenges", "proof_log", "votes", "payments", "challenge_messages", "challenge_offers", "challenge_invites"]) {
       ch = ch.on("postgres_changes", { event: "*", schema: "public", table: tb }, scheduleReload);
     }
     S.channel = ch.subscribe();
@@ -345,28 +351,42 @@
   function renderLedger() {
     const months = ledgerMonths();
     if (!S.month || !months.includes(S.month)) S.month = thisMonth();
-    const M = S.month, cur = thisMonth(), ML = monthLabel(M);
+    const M = S.month, cur = thisMonth(), ML = monthLabel(M), MLi = I.lang === "ro" ? ML.toLowerCase() : ML;
     const debts = simplify(balances(M));
     S._debts = debts;
     let h = "";
     const old = months.filter(k => k < cur).map(k => ({ k, d: simplify(balances(k)) })).filter(x => x.d.length);
     if (old.length) h += `<div class="result bad" style="margin-top:14px"><b>${esc(t("ledger.oldUnpaid"))}</b>${old.map(x => `<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:0">${esc(monthLabel(x.k))}: ${x.d.map(d => `${esc(nameOf(d.from))} → ${esc(nameOf(d.to))} <span class="mono">${esc(gbp(d.amount))}</span>`).join(", ")}</span><button class="btn sm ghost" data-month="${esc(x.k)}">${esc(t("ledger.seeMonth"))}</button></div>`).join("")}</div>`;
-    h += `<div class="chips" style="margin-top:14px" role="group">${months.map(k => `<button type="button" data-month="${esc(k)}" aria-pressed="${k === M}">${esc(k === cur ? t("month.this") : monthShort(k))}</button>`).join("")}</div>`;
+    const idx = months.indexOf(M), older = months[idx + 1], newer = months[idx - 1];
+    h += `<div class="monthnav" role="group">
+      <button type="button" class="mnav" ${older ? `data-month="${esc(older)}"` : "disabled"} aria-label="${esc(t("ledger.prev"))}">‹</button>
+      <div class="mname"><b>${esc(ML)}</b>${M === cur ? `<span>${esc(t("month.this"))}</span>` : ""}</div>
+      <button type="button" class="mnav" ${newer ? `data-month="${esc(newer)}"` : "disabled"} aria-label="${esc(t("ledger.next"))}">›</button>
+    </div>`;
+    {
+      const wonM = {};
+      S.challenges.forEach(c => { if (challengeMonth(c) !== M) return; transfersFor(c).forEach(x => { wonM[x.from] = (wonM[x.from] || 0) - x.amount; wonM[x.to] = (wonM[x.to] || 0) + x.amount; }); });
+      const best = Object.entries(wonM).map(([id, v]) => [id, r2(v)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+      const top = best.length ? best.filter(([, v]) => v === best[0][1]) : [];
+      h += top.length
+        ? `<div class="winner"><span class="lbl">${esc(t("ledger.winner"))}</span><div class="wrow">${top.map(([id]) => `${face(id, "av")}<b>${esc(nameOf(id))}</b>`).join("")}<span class="amt">+${esc(gbp(top[0][1]))}</span></div></div>`
+        : `<div class="winner none"><span class="lbl">${esc(t("ledger.winner"))}</span><div class="wrow muted">${esc(M === cur ? t("ledger.noWinner") : t("ledger.noWinnerOld", { month: MLi }))}</div></div>`;
+    }
     h += `<h2>${esc(t("ledger.whoOwes", { month: ML }))}</h2>`;
     h += debts.length ? `<div class="stack">${debts.map((d, i) => `
       <div class="debt"><div class="who">${face(d.from)}<b>${esc(nameOf(d.from))}</b><span class="muted">→</span>${face(d.to)}<b>${esc(nameOf(d.to))}</b></div>
       <span class="amt">${esc(gbp(d.amount))}</span>
       ${(d.from === S.me || d.to === S.me) ? `<button class="btn sm" data-paid="${i}">${esc(t("ledger.markPaid"))}</button>` : ""}
       </div>`).join("")}</div>
-      <p class="note">${esc(M === cur ? t("ledger.noteNow") : t("ledger.noteOld", { month: ML }))}</p>`
-      : `<div class="empty"><strong>${esc(M === cur ? t("ledger.emptyNowT") : t("ledger.emptyOldT"))}</strong>${esc(M === cur ? t("ledger.emptyNowS") : t("ledger.emptyOldS", { month: ML }))}</div>`;
+      <p class="note">${esc(M === cur ? t("ledger.noteNow") : t("ledger.noteOld", { month: MLi }))}</p>`
+      : `<div class="empty"><strong>${esc(M === cur ? t("ledger.emptyNowT") : t("ledger.emptyOldT"))}</strong>${esc(M === cur ? t("ledger.emptyNowS") : t("ledger.emptyOldS", { month: MLi }))}</div>`;
     const ids = Object.keys(S.members);
     const won = {};
     S.challenges.forEach(c => { if (challengeMonth(c) !== M) return; transfersFor(c).forEach(x => { won[x.from] = (won[x.from] || 0) - x.amount; won[x.to] = (won[x.to] || 0) + x.amount; }); });
     ids.sort((a, b) => (won[b] || 0) - (won[a] || 0));
     if (ids.length) {
       h += `<h2>${esc(t("ledger.rank", { month: ML }))}</h2><div class="card">${ids.map(id => { const v = r2(won[id] || 0); return `<div class="bal">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="v ${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${esc(gbp(v))}</span></div>`; }).join("")}</div>
-      <p class="note">${esc(t("ledger.rankNote", { month: ML }))}</p>`;
+      <p class="note">${esc(t("ledger.rankNote", { month: MLi }))}</p>`;
     }
     const pays = S.payments.filter(p => paymentMonth(p) === M).slice(0, 30);
     if (pays.length) h += `<h2>${esc(t("ledger.paid", { month: ML }))}</h2><div class="card">${pays.map(p => `<div class="bal"><span class="nm">${esc(nameOf(p.from_id))} → ${esc(nameOf(p.to_id))} <span class="muted">· ${esc(new Date(p.created_at).toLocaleDateString(I.locale, { day: "numeric", month: "short" }))}</span></span><span class="v">${esc(gbp(p.amount))}</span>${p.created_by === S.me ? `<button class="linkbtn" data-unpay="${esc(p.id)}">${esc(t("ledger.undo"))}</button>` : ""}</div>`).join("")}</div>`;
@@ -741,7 +761,7 @@
       const args = { p_group: S.gid, p_title: title, p_descr: $("nDesc").value.trim(), p_kind: S.kind, p_stake: r2(stake), p_deadline: $("nDeadline").value || null, p_photo_path: photo };
       if (target) args.p_target = target;
       if (S.newInvite.size) args.p_invite = [...S.newInvite];
-      const r = await rpc("create_challenge", args, t("toast.launched"));
+      const r = await rpc("create_challenge_v2", args, t("toast.launched"));
       if (r.ok) { $("newForm").reset(); S.stake = 10; S.newInvite = new Set(); setKind("duel"); renderStakeChips(); go("list"); if (r.data) openDetail(r.data); }
       else if (r.error) msg.textContent = errText(r.error);
     } catch (err) { msg.textContent = err.message || errText(err); }

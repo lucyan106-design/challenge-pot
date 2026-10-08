@@ -173,3 +173,17 @@ select{appearance:auto}
 .proof-head .stamp{margin-left:auto;font:500 12.5px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
 .foryou{display:flex;flex-direction:column;gap:6px}
 .foryou>.pill{align-self:flex-start}
+
+/* month navigator + winner */
+.monthnav{display:flex;align-items:center;gap:10px;margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px}
+.monthnav .mname{flex:1;text-align:center;display:flex;flex-direction:column;gap:2px}
+.monthnav .mname b{font:700 17px var(--f-display)}
+.monthnav .mname span{font-size:12px;color:var(--muted)}
+.mnav{width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface-2);color:var(--ink);font:700 22px/1 var(--f-body);cursor:pointer}
+.mnav[disabled]{opacity:.35;cursor:default}
+.winner{margin-top:10px;padding:14px;border-radius:var(--r);background:var(--stake-soft);display:flex;flex-direction:column;gap:8px}
+.winner .lbl{font:700 12px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--stake)}
+.winner .wrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:17px}
+.winner .wrow .amt{margin-left:auto;font:700 20px var(--f-mono);color:var(--good)}
+.winner.none{background:var(--surface-2)}
+.winner.none .lbl{color:var(--muted)}
