@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Challenge Pot</title>
+<meta name="description" content="Challenge-uri între prieteni, cu mize în £.">
+<meta name="theme-color" content="#1E6E47">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Challenge Pot">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">Challenge <b>Pot</b></div>
+  <button class="me" id="meBtn" hidden aria-label="Contul meu"></button>
+</header>
+
+<main class="wrap" id="loading">
+  <div class="hero"><h1>Pariuri între prieteni, <em>în £</em>.</h1><p class="muted">Se încarcă…</p></div>
+</main>
+
+<!-- auth -->
+<section class="wrap" id="authView" hidden>
+  <div class="hero">
+    <h1>Pariuri între prieteni, <em>în £</em>.</h1>
+    <p class="muted">Lansezi provocări, prietenii intră cu bani, votați cine a câștigat, iar aplicația ține socoteala cine cui datorează.</p>
+  </div>
+  <div class="card stack">
+    <div class="seg" role="tablist">
+      <button type="button" id="modeLogin" aria-pressed="true"><strong>Am cont</strong><span>Intră cu emailul</span></button>
+      <button type="button" id="modeSignup" aria-pressed="false"><strong>Cont nou</strong><span>Prima dată aici</span></button>
+    </div>
+    <form id="authForm" class="stack" novalidate>
+      <div class="field"><label for="aEmail">Email</label><input id="aEmail" type="email" autocomplete="email" inputmode="email" autocapitalize="off" required></div>
+      <div class="field"><label for="aPass">Parolă</label><input id="aPass" type="password" autocomplete="current-password" minlength="6" required>
+        <span class="note" id="passHint" hidden>Minim 6 caractere.</span></div>
+      <button class="btn block" type="submit" id="authBtn">Intră</button>
+      <p class="formmsg" id="authMsg" role="alert"></p>
+    </form>
+    <p class="note" id="forgotNote">Ai uitat parola? Spune-i administratorului grupului, ți-o resetează el.</p>
+  </div>
+</section>
+
+<!-- join -->
+<section class="wrap" id="joinView" hidden>
+  <div class="hero"><h1>Intră în grup cu <em>codul</em> primit.</h1><p class="muted">Codul de invitație ți-l dă cine te-a chemat.</p></div>
+  <form id="joinForm" class="card stack" novalidate>
+    <div class="field"><label for="jCode">Cod de invitație</label><input id="jCode" autocapitalize="characters" autocomplete="off" placeholder="ex: POT-ABC123"></div>
+    <div class="field"><label for="jNick">Cum te strigă prietenii?</label><input id="jNick" maxlength="24" autocomplete="nickname" placeholder="ex: Mihai"></div>
+    <button class="btn block" type="submit" id="joinBtn">Intră în grup</button>
+    <p class="formmsg" id="joinMsg" role="alert"></p>
+    <button class="btn ghost block" type="button" data-logout>Ieși din cont</button>
+  </form>
+</section>
+
+<!-- tabs -->
+<section class="wrap" id="tabList" hidden><div id="listBody"></div></section>
+
+<section class="wrap" id="tabNew" hidden>
+  <h2>Challenge nou</h2>
+  <form id="newForm" class="stack" novalidate>
+    <div class="seg" role="group" aria-label="Tip">
+      <button type="button" id="kindDuel" aria-pressed="true"><strong>Unul contra altuia</strong><span>Toți pun miza, câștigătorul ia potul</span></button>
+      <button type="button" id="kindPersonal" aria-pressed="false"><strong>Provocare personală</strong><span>Tu încerci, ceilalți pariază contra</span></button>
+    </div>
+    <div class="field"><label for="nTitle">Provocarea</label><input id="nTitle" maxlength="90" placeholder="ex: Cine face mai mulți pași săptămâna asta"></div>
+    <div class="field"><label for="nDesc">Reguli și cum se dovedește</label><textarea id="nDesc" maxlength="600" placeholder="ex: Screenshot din aplicația de pași duminică seara"></textarea></div>
+    <div class="field"><label>Miza de persoană</label>
+      <div class="chips" id="stakeChips"></div>
+      <input id="nStake" class="mono" inputmode="decimal" placeholder="Altă sumă, £" aria-label="Altă sumă în lire">
+    </div>
+    <div class="field"><label for="nDeadline">Termen (opțional)</label><input id="nDeadline" type="date"></div>
+    <button class="btn block" type="submit" id="createBtn">Lansează challenge-ul</button>
+    <p class="formmsg" id="newMsg" role="alert"></p>
+  </form>
+</section>
+
+<section class="wrap" id="tabLedger" hidden><div id="ledgerBody"></div></section>
+
+<!-- detail sheet -->
+<div class="sheet" id="detail" hidden>
+  <div class="wrap">
+    <button class="back" data-close>← Înapoi</button>
+    <div id="detailBody"></div>
+    <div id="proofForm" class="card stack" hidden>
+      <div class="field"><label for="pText">Dovada ta</label><textarea id="pText" maxlength="600" placeholder="Ce ai făcut, link, rezultat…"></textarea></div>
+      <div class="field"><label for="pPhoto">Poză (opțional)</label><input id="pPhoto" type="file" accept="image/*"></div>
+      <button class="btn block" id="pSend" type="button">Trimite dovada</button>
+    </div>
+    <div id="detailActions" class="stack"></div>
+  </div>
+</div>
+
+<!-- account sheet -->
+<div class="sheet" id="account" hidden>
+  <div class="wrap">
+    <button class="back" data-close>← Înapoi</button>
+    <h1 class="d-title">Contul meu</h1>
+    <div class="card stack">
+      <p class="muted" id="accEmail" style="margin:0"></p>
+      <form id="nickForm" class="stack" novalidate>
+        <div class="field"><label for="accNick">Numele tău în grup</label><input id="accNick" maxlength="24"></div>
+        <button class="btn ghost block" type="submit">Salvează numele</button>
+      </form>
+    </div>
+    <div class="card stack" id="adminCard" hidden>
+      <h2 style="margin:0">Invită prieteni</h2>
+      <p class="note" style="margin:0">Trimite-le linkul aplicației și codul de mai jos. Își fac cont, apoi intră cu codul.</p>
+      <div class="codebox"><span class="mono" id="inviteCode">…</span><button class="btn sm ghost" type="button" id="copyInvite">Copiază invitația</button></div>
+      <form id="codeForm" class="stack" novalidate>
+        <div class="field"><label for="newCode">Schimbă codul</label><input id="newCode" autocapitalize="characters" autocomplete="off" placeholder="Cod nou, 4–32 caractere"></div>
+        <button class="btn ghost block" type="submit">Schimbă codul</button>
+      </form>
+      <p class="note" style="margin:0">Codul vechi nu mai funcționează după schimbare. Cine e deja în grup rămâne.</p>
+    </div>
+    <div class="stack">
+      <button class="btn warn block" type="button" data-logout>Ieși din cont</button>
+    </div>
+  </div>
+</div>
+
+<nav id="nav" hidden><div class="inner">
+  <button data-tab="list" aria-current="page">Challenge-uri</button>
+  <button data-tab="new">+ Nou</button>
+  <button data-tab="ledger">Socoteala</button>
+</div></nav>
+
+<script src="config.js"></script>
+<script src="vendor/supabase-2.117.0.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
