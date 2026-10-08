@@ -123,7 +123,7 @@ nav button[aria-current="page"]{color:var(--felt);background:var(--surface-2)}
 .grp{display:inline-flex;align-items:center;gap:6px;max-width:44vw;font:600 13.5px var(--f-body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 12px;cursor:pointer}
 .grp span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 header .brand{flex:1;min-width:0}
-@media (max-width:420px){header .brand{font-size:19px}.me span{display:none}}
+@media (max-width:420px){header .brand{font-size:19px}.me span:not(.av){display:none}}
 label>input{margin-top:6px;font-weight:400}
 .grow{display:flex;align-items:center;gap:10px;width:100%;padding:12px 4px;border:0;border-top:1px solid var(--line);background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
 .grow:first-child{border-top:0}
@@ -147,3 +147,17 @@ label>input{margin-top:6px;font-weight:400}
 .chatform{display:flex;gap:8px;margin-top:8px}
 .chatform input{flex:1;min-width:0}
 .chat-empty{color:var(--muted);text-align:center;font-size:13.5px;padding:10px 0}
+
+/* counter-offers */
+.offer{display:flex;flex-direction:column;gap:8px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.offer.pending{border-color:var(--stake);background:var(--stake-soft)}
+.offer .head{display:flex;align-items:center;gap:8px;font-weight:600}
+.offer .terms{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px;margin:0}
+.offer .terms dt{color:var(--muted)}
+.offer .terms dd{margin:0;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.offer .btns{display:flex;gap:8px;flex-wrap:wrap}
+.offer .btns .btn{flex:1 1 120px}
+.offer .state{font-size:12.5px;color:var(--muted)}
+.was{text-decoration:line-through;color:var(--muted);margin-right:6px}
+.me{flex:none}
+.grp{flex:0 1 auto;min-width:0}

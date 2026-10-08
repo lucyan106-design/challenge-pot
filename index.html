@@ -22,7 +22,7 @@
 <header id="topbar">
   <div class="brand">Challenge <b>Pot</b></div>
   <button class="grp" id="grpBtn" hidden aria-label="Schimbă grupul"><span id="grpName"></span><span aria-hidden="true">▾</span></button>
-  <button class="me" id="meBtn" hidden aria-label="Contul meu"></button>
+  <button class="me" id="meBtn" hidden aria-label="Contul meu și grupurile mele"></button>
 </header>
 
 <main class="wrap" id="loading">
@@ -94,6 +94,18 @@
       <button class="btn block" id="pSend" type="button">Trimite dovada</button>
     </div>
     <div id="detailActions" class="stack"></div>
+    <div id="offerBox" hidden>
+      <h2>Contra-oferte</h2>
+      <div class="stack" id="offerList"></div>
+      <button class="btn ghost block" type="button" id="offerToggle">Fă o contra-ofertă</button>
+      <form id="offerForm" class="card stack" hidden novalidate>
+        <p class="note" style="margin:0">Propune alte reguli, altă miză sau amândouă. Dacă cine a lansat acceptă, challenge-ul se schimbă și intri automat.</p>
+        <div class="field"><label for="oDescr">Regulile propuse de tine</label><textarea id="oDescr" maxlength="600" placeholder="ex: o dată la două zile"></textarea></div>
+        <div class="field"><label for="oStake">Miza propusă de persoană (£)</label><input id="oStake" class="mono" inputmode="decimal" placeholder="ex: 30"></div>
+        <button class="btn block" type="submit" id="oSend">Trimite contra-oferta</button>
+        <p class="formmsg" id="oMsg" role="alert"></p>
+      </form>
+    </div>
     <div id="chatBox" hidden>
       <h2>Chat</h2>
       <div class="card chat" id="chatList" aria-live="polite"></div>
@@ -134,6 +146,10 @@
         </form>
       </div>
     </div>
+    <h2>Grupurile mele</h2>
+    <div class="card" id="accGroupList"></div>
+    <div class="stack" id="accGroupForms"></div>
+    <h2>Contul meu</h2>
     <div class="card stack">
       <p class="muted" id="accEmail" style="margin:0"></p>
       <form id="nickForm" class="stack" novalidate>

@@ -34,8 +34,8 @@
     session: null, me: null,
     groups: [],          // [{id,name,nick,is_admin}]
     gid: null,           // current group id
-    members: {}, challenges: [], payments: [], proofs: {}, votes: {}, messages: [], photoUrls: {},
-    tab: "list", openId: null, kind: "duel", stake: 10, mode: "login", channel: null, loaded: false, busy: false
+    members: {}, challenges: [], payments: [], proofs: {}, votes: {}, messages: [], offers: [], photoUrls: {},
+    tab: "list", month: null, openId: null, kind: "duel", stake: 10, mode: "login", channel: null, loaded: false, busy: false
   };
   const STATUS = { open: "Se strâng mizele", active: "În desfășurare", voting: "La vot", settled: "Închis", cancelled: "Anulat" };
   const curGroup = () => S.groups.find(g => g.id === S.gid) || null;
@@ -82,13 +82,27 @@
     }
     return out;
   }
-  function balances() {
+  const pad = (n) => String(n).padStart(2, "0");
+  const monthKey = (d) => { const x = d ? new Date(d) : new Date(); return x.getFullYear() + "-" + pad(x.getMonth() + 1); };
+  const thisMonth = () => monthKey();
+  const monthLabel = (k) => { const [y, m] = k.split("-").map(Number); const t = new Date(y, m - 1, 15).toLocaleDateString("ro-RO", { month: "long", year: "numeric" }); return t.charAt(0).toUpperCase() + t.slice(1); };
+  const monthShort = (k) => { const [y, m] = k.split("-").map(Number); const t = new Date(y, m - 1, 15).toLocaleDateString("ro-RO", { month: "short" }).replace(".", ""); return (t.charAt(0).toUpperCase() + t.slice(1)) + (y !== new Date().getFullYear() ? " " + y : ""); };
+  const challengeMonth = (c) => c.settled_at ? monthKey(c.settled_at) : null;
+  const paymentMonth = (p) => /^\d{4}-\d{2}/.test(String(p.period || "")) ? String(p.period).slice(0, 7) : monthKey(p.created_at);
+  function balances(month) {
     const bal = {};
     const add = (id, v) => { bal[id] = (bal[id] || 0) + v; };
-    for (const c of S.challenges) for (const t of transfersFor(c)) { add(t.from, -t.amount); add(t.to, t.amount); }
-    for (const p of S.payments) { add(p.from_id, Number(p.amount)); add(p.to_id, -Number(p.amount)); }
+    for (const c of S.challenges) { if (month && challengeMonth(c) !== month) continue; for (const t of transfersFor(c)) { add(t.from, -t.amount); add(t.to, t.amount); } }
+    for (const p of S.payments) { if (month && paymentMonth(p) !== month) continue; add(p.from_id, Number(p.amount)); add(p.to_id, -Number(p.amount)); }
     return bal;
   }
+  function ledgerMonths() {
+    const set = new Set([thisMonth()]);
+    S.challenges.forEach(c => { const k = challengeMonth(c); if (k && transfersFor(c).length) set.add(k); });
+    S.payments.forEach(p => set.add(paymentMonth(p)));
+    return [...set].sort().reverse();
+  }
+  function allDebts() { return ledgerMonths().flatMap(k => simplify(balances(k)).map(d => ({ ...d, month: k }))); }
   function simplify(bal) {
     const debt = [], cred = [];
     for (const [id, v] of Object.entries(bal)) { const r = r2(v); if (r < 0) debt.push([id, -r]); else if (r > 0) cred.push([id, r]); }
@@ -102,7 +116,7 @@
     }
     return out;
   }
-  window.__cpMath = { transfersFor, balances, simplify, S };
+  window.__cpMath = { transfersFor, simplify, S };
 
   // ---------- data ----------
   async function rpc(name, args, okMsg) {
@@ -169,15 +183,17 @@
   async function loadDetail(id) {
     const c = S.challenges.find(x => x.id === id);
     const isPlayer = c ? playersOf(c).includes(S.me) : false;
-    const [p, v, msg] = await Promise.all([
+    const [p, v, msg, off] = await Promise.all([
       sb.from("proofs").select("*").eq("challenge_id", id),
       sb.from("votes").select("*").eq("challenge_id", id),
-      isPlayer ? sb.from("challenge_messages").select("*").eq("challenge_id", id).order("created_at", { ascending: true }) : Promise.resolve({ data: [] })
+      isPlayer ? sb.from("challenge_messages").select("*").eq("challenge_id", id).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
+      sb.from("challenge_offers").select("*").eq("challenge_id", id).order("created_at", { ascending: true })
     ]);
     if (S.openId !== id) return;
     S.proofs = {}; (p.data || []).forEach(r => { S.proofs[r.user_id] = r; });
     S.votes = {}; (v.data || []).forEach(r => { S.votes[r.voter_id] = r; });
     S.messages = msg.data || [];
+    S.offers = off.data || [];
     await signPhotos(Object.values(S.proofs).map(r => r.photo_path));
   }
 
@@ -186,7 +202,7 @@
   function subscribe() {
     if (S.channel) return;
     let ch = sb.channel("pot");
-    for (const t of ["groups", "group_members", "challenges", "proofs", "votes", "payments", "challenge_messages"]) {
+    for (const t of ["groups", "group_members", "challenges", "proofs", "votes", "payments", "challenge_messages", "challenge_offers"]) {
       ch = ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
     }
     S.channel = ch.subscribe();
@@ -207,16 +223,19 @@
     if (!$("startForms").children.length) $("startForms").innerHTML = groupFormsHtml();
     show("startView");
   }
-  function renderGroupsSheet() {
-    $("groupList").innerHTML = S.groups.map(g => `<button class="grow" data-switch="${esc(g.id)}">
+  function groupListHtml() {
+    return S.groups.map(g => `<button class="grow" data-switch="${esc(g.id)}">
       <span class="nm">${esc(g.name)}<span class="sub">tu ești ${esc(g.nick)}${g.is_admin ? " · administrator" : ""}</span></span>
       ${g.id === S.gid ? '<span class="tick" aria-label="grupul curent">✓</span>' : ""}</button>`).join("");
+  }
+  function renderGroupsSheet() {
+    $("groupList").innerHTML = groupListHtml();
     if (!$("groupForms").children.length) $("groupForms").innerHTML = groupFormsHtml();
   }
   async function switchGroup(id) {
     if (id === S.gid) { closeSheets(); return; }
     S.gid = id; store.set("cp-group-" + S.me, id);
-    S.members = {}; S.challenges = []; S.payments = []; S.openId = null;
+    S.members = {}; S.challenges = []; S.payments = []; S.openId = null; S.month = null;
     closeSheets(); go("list");
     $("listBody").innerHTML = `<p class="muted" style="margin-top:20px">Se încarcă…</p>`;
     renderTop();
@@ -263,7 +282,7 @@
   function renderList() {
     const live = S.challenges.filter(c => ["open", "active", "voting"].includes(c.status));
     const done = S.challenges.filter(c => c.status === "settled").slice(0, 20);
-    const debts = simplify(balances());
+    const debts = allDebts();
     const owe = debts.filter(d => d.from === S.me).reduce((s, d) => s + d.amount, 0);
     const due = debts.filter(d => d.to === S.me).reduce((s, d) => s + d.amount, 0);
     let h = "";
@@ -278,24 +297,36 @@
 
   // ---------- render: ledger ----------
   function renderLedger() {
-    const bal = balances();
+    const months = ledgerMonths();
+    if (!S.month || !months.includes(S.month)) S.month = thisMonth();
+    const M = S.month, cur = thisMonth();
+    const bal = balances(M);
     const debts = simplify(bal);
     S._debts = debts;
-    let h = `<h2>Cine cui datorează</h2>`;
+    let h = "";
+    // unpaid from earlier months
+    const old = months.filter(k => k < cur).map(k => ({ k, d: simplify(balances(k)) })).filter(x => x.d.length);
+    if (old.length) h += `<div class="result bad" style="margin-top:14px"><b>Neachitat din lunile trecute</b>${old.map(x => `<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:0">${esc(monthLabel(x.k))}: ${x.d.map(d => `${esc(nameOf(d.from))} → ${esc(nameOf(d.to))} <span class="mono">${esc(gbp(d.amount))}</span>`).join(", ")}</span><button class="btn sm ghost" data-month="${esc(x.k)}">Vezi luna</button></div>`).join("")}</div>`;
+    h += `<div class="chips" style="margin-top:14px" role="group" aria-label="Luna">${months.map(k => `<button type="button" data-month="${esc(k)}" aria-pressed="${k === M}">${esc(k === cur ? "Luna asta" : monthShort(k))}</button>`).join("")}</div>`;
+    h += `<h2>Cine cui datorează · ${esc(monthLabel(M))}</h2>`;
     h += debts.length ? `<div class="stack">${debts.map((d, i) => `
       <div class="debt"><div class="who">${face(d.from)}<b>${esc(nameOf(d.from))}</b><span class="muted">→</span>${face(d.to)}<b>${esc(nameOf(d.to))}</b></div>
       <span class="amt">${esc(gbp(d.amount))}</span>
       ${(d.from === S.me || d.to === S.me) ? `<button class="btn sm" data-paid="${i}">Marchează plătit</button>` : ""}
-      </div>`).join("")}</div>`
-      : `<div class="empty"><strong>Toată lumea e la zi</strong>Când se închide un challenge, aici apare cine cui are de dat, deja compensat între voi.</div>`;
-    const ids = Object.keys(S.members).sort((a, b) => (bal[b] || 0) - (bal[a] || 0));
+      </div>`).join("")}</div>
+      <p class="note">${M === cur ? "Se plătește la final de lună. Suma se actualizează la fiecare challenge închis luna asta." : "Banii pentru " + esc(monthLabel(M).toLowerCase()) + " se dau direct, prin transfer, apoi se bifează „Marchează plătit”."}</p>`
+      : `<div class="empty"><strong>${M === cur ? "Nimic de plătit luna asta, deocamdată" : "Luna e achitată"}</strong>${M === cur ? "Când se închide un challenge, aici apare cine cui are de dat la final de lună, deja compensat între voi." : "Toată lumea e la zi pentru " + esc(monthLabel(M)) + "."}</div>`;
+    const ids = Object.keys(S.members);
+    const won = {};
+    S.challenges.forEach(c => { if (challengeMonth(c) !== M) return; transfersFor(c).forEach(t => { won[t.from] = (won[t.from] || 0) - t.amount; won[t.to] = (won[t.to] || 0) + t.amount; }); });
+    ids.sort((a, b) => (won[b] || 0) - (won[a] || 0));
     if (ids.length) {
-      h += `<h2>Clasament</h2><div class="card">${ids.map(id => { const v = r2(bal[id] || 0); return `<div class="bal">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="v ${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${esc(gbp(v))}</span></div>`; }).join("")}</div>
-      <p class="note">Clasamentul arată cât ai câștigat sau pierdut net în acest grup, după plățile deja făcute.</p>`;
+      h += `<h2>Clasament · ${esc(monthLabel(M))}</h2><div class="card">${ids.map(id => { const v = r2(won[id] || 0); return `<div class="bal">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="v ${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${esc(gbp(v))}</span></div>`; }).join("")}</div>
+      <p class="note">Cât a câștigat sau a pierdut fiecare din challenge-urile închise în ${esc(monthLabel(M).toLowerCase())}. Fiecare lună începe de la £0.</p>`;
     }
-    const pays = S.payments.slice(0, 20);
-    if (pays.length) h += `<h2>Plăți bifate</h2><div class="card">${pays.map(p => `<div class="bal"><span class="nm">${esc(nameOf(p.from_id))} → ${esc(nameOf(p.to_id))} <span class="muted">· ${esc(new Date(p.created_at).toLocaleDateString("ro-RO", { day: "numeric", month: "short" }))}</span></span><span class="v">${esc(gbp(p.amount))}</span>${p.created_by === S.me ? `<button class="linkbtn" data-unpay="${esc(p.id)}">anulează</button>` : ""}</div>`).join("")}</div>`;
-    h += `<p class="note" style="margin-top:16px">Datoriile sunt compensate automat: dacă Ana îi datorează lui Mihai £10 și Mihai Anei £4, apare doar £6. Banii se trimit direct, prin transfer bancar; aplicația doar ține evidența.</p>`;
+    const pays = S.payments.filter(p => paymentMonth(p) === M).slice(0, 30);
+    if (pays.length) h += `<h2>Plăți bifate · ${esc(monthLabel(M))}</h2><div class="card">${pays.map(p => `<div class="bal"><span class="nm">${esc(nameOf(p.from_id))} → ${esc(nameOf(p.to_id))} <span class="muted">· ${esc(new Date(p.created_at).toLocaleDateString("ro-RO", { day: "numeric", month: "short" }))}</span></span><span class="v">${esc(gbp(p.amount))}</span>${p.created_by === S.me ? `<button class="linkbtn" data-unpay="${esc(p.id)}">anulează</button>` : ""}</div>`).join("")}</div>`;
+    h += `<p class="note" style="margin-top:16px">Datoriile sunt compensate automat între toți din grup: dacă Ana îi datorează lui Mihai £10 și Mihai Anei £4, apare doar £6. Aplicația doar ține evidența; banii se trimit direct.</p>`;
     $("ledgerBody").innerHTML = h;
   }
 
@@ -305,8 +336,9 @@
   const tally = () => { const t = {}; for (const v of Object.values(S.votes)) t[v.pick] = (t[v.pick] || 0) + 1; return t; };
 
   async function openDetail(id) {
-    S.openId = id; S.proofs = {}; S.votes = {}; S.messages = [];
+    S.openId = id; S.proofs = {}; S.votes = {}; S.messages = []; S.offers = [];
     $("pText").value = ""; $("pPhoto").value = ""; $("chatInput").value = "";
+    $("offerForm").hidden = true; $("oMsg").textContent = "";
     $("detail").hidden = false; $("detail").scrollTop = 0;
     renderDetail();
     try { await loadDetail(id); } catch {}
@@ -333,7 +365,7 @@
   function renderDetail(scrollChat) {
     if (!S.openId) return;
     const c = S.challenges.find(x => x.id === S.openId);
-    if (!c) { $("detailBody").innerHTML = `<div class="empty" style="margin-top:12px"><strong>Challenge-ul nu mai există</strong></div>`; $("detailActions").innerHTML = ""; $("proofForm").hidden = true; $("chatBox").hidden = true; $("chatLocked").hidden = true; return; }
+    if (!c) { $("detailBody").innerHTML = `<div class="empty" style="margin-top:12px"><strong>Challenge-ul nu mai există</strong></div>`; $("detailActions").innerHTML = ""; $("proofForm").hidden = true; $("chatBox").hidden = true; $("chatLocked").hidden = true; $("offerBox").hidden = true; return; }
     const isP = c.kind === "personal";
     const players = playersOf(c);
     const inIt = players.includes(S.me);
@@ -341,6 +373,7 @@
       <h1 class="d-title">${esc(c.title)}</h1>
       ${c.photo_path && S.photoUrls[c.photo_path] ? `<a href="${esc(S.photoUrls[c.photo_path])}" target="_blank" rel="noopener"><img class="cover" src="${esc(S.photoUrls[c.photo_path])}" alt="Poza challenge-ului"></a>` : ""}
       ${c.descr ? `<p style="margin:0 0 12px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(c.descr)}</p>` : ""}
+      ${(() => { const acc = S.offers.filter(o => o.status === "accepted").pop(); return acc ? `<p class="note" style="margin:0 0 12px">Termeni schimbați după contra-oferta lui ${esc(nameOf(acc.proposer))}.${c.status === "open" ? " Cine intrase înainte trebuie să intre din nou." : ""}</p>` : ""; })()}
       <div class="card"><dl class="kv">
         <dt>Tip</dt><dd>${isP ? `Personală: ${esc(nameOf(c.creator))} încearcă, ceilalți pariază contra` : "Unul contra altuia, câștigătorul ia potul"}</dd>
         <dt>Miză</dt><dd class="mono">${esc(gbp(c.stake))} de persoană</dd>
@@ -370,7 +403,7 @@
         : ((c.result.winners || []).length > 1 ? `Egalitate: ${(c.result.winners || []).map(nameOf).join(", ")}` : `Câștigă: ${(c.result.winners || []).map(nameOf).join(", ")}`);
       h += `<h2>Rezultat</h2><div class="result ${isP && !c.result.success ? "bad" : ""}"><b style="font-size:17px">${esc(head)}</b>
         <div style="margin-top:8px;font-size:14px">${tr.map(x => `${esc(nameOf(x.from))} → ${esc(nameOf(x.to))} <span class="mono">${esc(gbp(x.amount))}</span>`).join("<br>") || "Nimeni nu are nimic de dat."}</div></div>
-        <p class="note">Sumele au intrat automat în Socoteala.</p>`;
+        <p class="note">Sumele au intrat în Socoteala pe ${esc(monthLabel(challengeMonth(c) || thisMonth()).toLowerCase())}.</p>`;
     }
     if (c.status === "cancelled") h += `<div class="empty" style="margin-top:12px"><strong>Anulat</strong>Nimeni nu datorează nimic.</div>`;
     $("detailBody").innerHTML = h;
@@ -398,7 +431,35 @@
       a.push(`<button class="btn block" data-act="settle" ${cast >= need ? "" : "disabled"}>Închide votul și calculează</button>`);
     }
     $("detailActions").innerHTML = a.join("");
+    renderOffers(c);
     renderChat(c, scrollChat);
+  }
+
+  // ---------- counter-offers ----------
+  function renderOffers(c) {
+    const open = c.status === "open";
+    const pending = S.offers.filter(o => o.status === "pending");
+    const decided = S.offers.filter(o => o.status === "accepted" || o.status === "rejected");
+    const canPropose = open && c.creator !== S.me;
+    $("offerBox").hidden = !(canPropose || pending.length || (open && decided.length));
+    if ($("offerBox").hidden) return;
+    const terms = (o) => `<dl class="terms">
+        ${o.descr != null ? `<dt>Reguli</dt><dd>${c.descr && o.status === "pending" ? `<span class="was">${esc(c.descr)}</span>` : ""}${esc(o.descr)}</dd>` : ""}
+        ${o.stake != null ? `<dt>Miză</dt><dd class="mono">${o.status === "pending" ? `<span class="was">${esc(gbp(c.stake))}</span>` : ""}${esc(gbp(o.stake))} de persoană</dd>` : ""}
+      </dl>`;
+    const items = pending.map(o => {
+      let btns = "";
+      if (open && c.creator === S.me) btns = `<div class="btns"><button class="btn sm" data-offer-accept="${esc(o.id)}">Acceptă</button><button class="btn sm ghost" data-offer-reject="${esc(o.id)}">Refuză</button></div>
+        <span class="state">Dacă accepți, cine intrase deja trebuie să intre din nou cu noii termeni.</span>`;
+      else if (o.proposer === S.me) btns = `<div class="btns"><button class="btn sm ghost" data-offer-withdraw="${esc(o.id)}">Retrage contra-oferta</button></div><span class="state">Așteaptă răspunsul lui ${esc(nameOf(c.creator))}.</span>`;
+      else btns = `<span class="state">Așteaptă răspunsul lui ${esc(nameOf(c.creator))}.</span>`;
+      return `<div class="offer pending"><div class="head">${face(o.proposer)}${esc(nameOf(o.proposer))} propune:</div>${terms(o)}${btns}</div>`;
+    });
+    const history = decided.slice(-3).map(o => `<div class="offer"><div class="head">${face(o.proposer)}${esc(nameOf(o.proposer))}</div>${terms(o)}<span class="state">${o.status === "accepted" ? "Acceptată" : "Refuzată"}</span></div>`);
+    $("offerList").innerHTML = items.concat(history).join("") || "";
+    $("offerList").hidden = !items.length && !history.length;
+    $("offerToggle").hidden = !canPropose || !$("offerForm").hidden;
+    if (!canPropose) $("offerForm").hidden = true;
   }
 
   // ---------- account ----------
@@ -414,6 +475,8 @@
     if (g && document.activeElement !== $("accNick")) $("accNick").value = g.nick;
     if (g && document.activeElement !== $("grpRename")) $("grpRename").value = g.name;
     $("adminTools").hidden = !(g && g.is_admin);
+    $("accGroupList").innerHTML = groupListHtml();
+    if (!$("accGroupForms").children.length) $("accGroupForms").innerHTML = groupFormsHtml();
   }
   function renderTop() {
     const g = curGroup();
@@ -485,13 +548,17 @@
     else if (t.dataset.close !== undefined) closeSheets();
     else if (t.dataset.switch) switchGroup(t.dataset.switch);
     else if (t.dataset.logout !== undefined) { unsubscribe(); await sb.auth.signOut(); }
+    else if (t.dataset.month) { S.month = t.dataset.month; renderLedger(); window.scrollTo(0, 0); }
     else if (t.dataset.stake) { S.stake = +t.dataset.stake; $("nStake").value = ""; renderStakeChips(); }
     else if (t.dataset.vote) { if (S.openId) await rpc("cast_vote", { p_id: S.openId, p_pick: t.dataset.vote }, "Vot înregistrat"); }
     else if (t.dataset.paid !== undefined) {
       const d = S._debts && S._debts[+t.dataset.paid]; if (!d) return;
       if (!confirmInline("pay" + t.dataset.paid)) return;
-      await rpc("record_payment", { p_group: S.gid, p_from: d.from, p_to: d.to, p_amount: d.amount }, "Plată bifată");
+      await rpc("record_payment", { p_group: S.gid, p_period: S.month + "-01", p_from: d.from, p_to: d.to, p_amount: d.amount }, "Plată bifată");
     }
+    else if (t.dataset.offerAccept) { if (!confirmInline("acc" + t.dataset.offerAccept)) return; await rpc("respond_counter", { p_offer: t.dataset.offerAccept, p_accept: true }, "Contra-ofertă acceptată. Termenii s-au schimbat."); }
+    else if (t.dataset.offerReject) { await rpc("respond_counter", { p_offer: t.dataset.offerReject, p_accept: false }, "Contra-ofertă refuzată"); }
+    else if (t.dataset.offerWithdraw) { await rpc("withdraw_counter", { p_offer: t.dataset.offerWithdraw }, "Contra-ofertă retrasă"); }
     else if (t.dataset.unpay) { if (!confirmInline("unpay" + t.dataset.unpay)) return; await rpc("delete_payment", { p_id: t.dataset.unpay }, "Plată anulată"); }
   });
   document.addEventListener("submit", (e) => {
@@ -553,6 +620,28 @@
     } catch (e) { toast(e.message || errText(e)); }
     finally { $("pSend").disabled = false; renderDetail(); }
   };
+
+  $("offerToggle").onclick = () => {
+    const c = S.challenges.find(x => x.id === S.openId); if (!c) return;
+    $("oDescr").value = c.descr || ""; $("oStake").value = String(Number(c.stake));
+    $("oMsg").textContent = ""; $("offerForm").hidden = false; $("offerToggle").hidden = true; $("oDescr").focus();
+  };
+  $("offerForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const c = S.challenges.find(x => x.id === S.openId); if (!c) return;
+    const msg = $("oMsg"); msg.textContent = "";
+    const descr = $("oDescr").value.trim();
+    const raw = $("oStake").value.trim().replace(",", ".").replace(/[£\s]/g, "");
+    const stake = raw ? Number(raw) : null;
+    if (stake !== null && (!Number.isFinite(stake) || stake < 0.5 || stake > 1000)) { msg.textContent = "Miza trebuie să fie între £0.50 și £1000."; return; }
+    const sameDescr = descr === (c.descr || "").trim(), sameStake = stake === null || r2(stake) === r2(c.stake);
+    if ((sameDescr || !descr) && sameStake) { msg.textContent = "Schimbă regulile sau miza ca să faci o contra-ofertă."; return; }
+    $("oSend").disabled = true;
+    const r = await rpc("propose_counter", { p_id: c.id, p_descr: sameDescr ? null : descr, p_stake: sameStake ? null : r2(stake) }, "Contra-ofertă trimisă");
+    $("oSend").disabled = false;
+    if (r.ok) { $("offerForm").hidden = true; renderDetail(); }
+    else if (r.error) msg.textContent = errText(r.error);
+  });
 
   $("chatForm").addEventListener("submit", async (e) => {
     e.preventDefault();

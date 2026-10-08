@@ -1,6 +1,8 @@
 -- =====================================================================
 -- Challenge Pot — migration 002: multiple groups, each with its own invite code
--- Also adds: a photo on each challenge and a chat inside each challenge for its players.
+-- Also adds: a photo on each challenge, a chat inside each challenge for its players,
+-- counter-offers (other rules and/or another stake) that the creator can accept or refuse,
+-- and a monthly ledger: payments are marked per month, each month starts from zero.
 -- Run ONCE, after supabase.sql (001). Paste the whole file into:
 -- Supabase Dashboard → SQL Editor → New query → Run
 -- Existing members, challenges and payments move into one group that keeps the current invite code.
@@ -48,6 +50,11 @@ begin
   end if;
 end $$;
 
+-- payments belong to a month (money is settled at the end of each month)
+alter table public.payments add column period date;
+update public.payments set period = date_trunc('month', created_at)::date;
+alter table public.payments alter column period set not null;
+
 alter table public.challenges alter column group_id set not null;
 alter table public.payments   alter column group_id set not null;
 create index challenges_group_idx on public.challenges (group_id, created_at desc);
@@ -78,6 +85,21 @@ create table public.challenge_messages (
   created_at   timestamptz not null default now()
 );
 create index challenge_messages_idx on public.challenge_messages (challenge_id, created_at);
+
+-- ---------- counter-offers: someone challenged proposes other rules and/or another stake ----------
+create table public.challenge_offers (
+  id           uuid primary key default gen_random_uuid(),
+  challenge_id uuid not null references public.challenges(id) on delete cascade,
+  proposer     uuid not null references auth.users(id) on delete cascade,
+  descr        text check (descr is null or char_length(descr) <= 600),
+  stake        numeric(8,2) check (stake is null or (stake >= 0.5 and stake <= 1000)),
+  status       text not null default 'pending' check (status in ('pending','accepted','rejected','withdrawn','superseded')),
+  created_at   timestamptz not null default now(),
+  decided_at   timestamptz,
+  check (descr is not null or stake is not null)
+);
+create index challenge_offers_idx on public.challenge_offers (challenge_id, created_at);
+create unique index challenge_offers_one_pending on public.challenge_offers (challenge_id, proposer) where status = 'pending';
 
 -- ---------- remove the single-group pieces ----------
 drop policy if exists "members read members"    on public.members;
@@ -125,6 +147,10 @@ create policy "read group votes"      on public.votes         for select to auth
 alter table public.challenge_messages enable row level security;
 create policy "players read challenge chat" on public.challenge_messages for select to authenticated
   using (exists (select 1 from public.challenges c where c.id = challenge_id and public._is_player(c, auth.uid())));
+
+alter table public.challenge_offers enable row level security;
+create policy "group reads counter-offers" on public.challenge_offers for select to authenticated
+  using (exists (select 1 from public.challenges c where c.id = challenge_id and public.is_group_member(c.group_id)));
 
 create policy "read proof photos of my groups" on storage.objects for select to authenticated
   using (bucket_id = 'proofs' and (
@@ -463,8 +489,71 @@ begin
   insert into public.challenge_messages (challenge_id, user_id, body) values (p_id, uid, btrim(p_body));
 end $$;
 
+-- ---------- counter-offers ----------
+create or replace function public.propose_counter(p_id uuid, p_descr text, p_stake numeric)
+returns uuid language plpgsql security definer set search_path = ''
+as $$
+declare uid uuid := public._uid(); c public.challenges := public._challenge_for_update(p_id);
+        v_descr text := nullif(btrim(coalesce(p_descr,'')), ''); v_stake numeric := p_stake; new_id uuid;
+begin
+  if c.status <> 'open' then raise exception 'Contra-oferta se poate face doar înainte de pornire.' using errcode = '22023'; end if;
+  if uid = c.creator then raise exception 'Poți modifica direct doar prin anulare și challenge nou.' using errcode = '22023'; end if;
+  if v_descr is not null and v_descr = coalesce(c.descr,'') then v_descr := null; end if;
+  if v_stake is not null and round(v_stake, 2) = c.stake then v_stake := null; end if;
+  if v_descr is null and v_stake is null then
+    raise exception 'Schimbă regulile sau miza ca să faci o contra-ofertă.' using errcode = '22023';
+  end if;
+  if v_descr is not null and char_length(v_descr) > 600 then raise exception 'Regulile pot avea maxim 600 de caractere.' using errcode = '22023'; end if;
+  if v_stake is not null and (v_stake < 0.5 or v_stake > 1000) then
+    raise exception 'Miza trebuie să fie între £0.50 și £1000.' using errcode = '22023';
+  end if;
+  update public.challenge_offers set status = 'withdrawn', decided_at = now()
+   where challenge_id = p_id and proposer = uid and status = 'pending';
+  insert into public.challenge_offers (challenge_id, proposer, descr, stake)
+  values (p_id, uid, v_descr, case when v_stake is null then null else round(v_stake, 2) end)
+  returning id into new_id;
+  return new_id;
+end $$;
+
+create or replace function public.respond_counter(p_offer uuid, p_accept boolean)
+returns void language plpgsql security definer set search_path = ''
+as $$
+declare uid uuid := public._uid(); o public.challenge_offers; c public.challenges;
+begin
+  select * into o from public.challenge_offers where id = p_offer for update;
+  if not found then raise exception 'Contra-oferta nu există.' using errcode = '22023'; end if;
+  c := public._challenge_for_update(o.challenge_id);
+  if c.creator <> uid then raise exception 'Doar cine a lansat challenge-ul răspunde la contra-oferte.' using errcode = '42501'; end if;
+  if o.status <> 'pending' then raise exception 'Contra-oferta nu mai e valabilă.' using errcode = '22023'; end if;
+  if c.status <> 'open' then raise exception 'Challenge-ul a pornit deja.' using errcode = '22023'; end if;
+  if not p_accept then
+    update public.challenge_offers set status = 'rejected', decided_at = now() where id = p_offer;
+    return;
+  end if;
+  -- new terms: everyone who joined on the old terms must join again; the proposer is in automatically
+  update public.challenges set
+    descr        = coalesce(o.descr, descr),
+    stake        = coalesce(o.stake, stake),
+    participants = case when kind = 'duel' then array[creator, o.proposer] else participants end,
+    backers      = case when kind = 'personal' then array[o.proposer] else backers end
+  where id = c.id;
+  update public.challenge_offers set status = 'accepted', decided_at = now() where id = p_offer;
+  update public.challenge_offers set status = 'superseded', decided_at = now()
+   where challenge_id = c.id and status = 'pending' and id <> p_offer;
+end $$;
+
+create or replace function public.withdraw_counter(p_offer uuid)
+returns void language plpgsql security definer set search_path = ''
+as $$
+declare uid uuid := public._uid();
+begin
+  update public.challenge_offers set status = 'withdrawn', decided_at = now()
+   where id = p_offer and proposer = uid and status = 'pending';
+  if not found then raise exception 'Poți retrage doar contra-ofertele tale în așteptare.' using errcode = '22023'; end if;
+end $$;
+
 -- ---------- payments (per group) ----------
-create or replace function public.record_payment(p_group uuid, p_from uuid, p_to uuid, p_amount numeric)
+create or replace function public.record_payment(p_group uuid, p_period date, p_from uuid, p_to uuid, p_amount numeric)
 returns void language plpgsql security definer set search_path = ''
 as $$
 declare uid uuid := public._require_group_member(p_group);
@@ -476,7 +565,11 @@ begin
     raise exception 'Persoana nu e în grup.' using errcode = '22023';
   end if;
   if p_amount is null or p_amount <= 0 or p_amount > 10000 then raise exception 'Sumă invalidă.' using errcode = '22023'; end if;
-  insert into public.payments (group_id, from_id, to_id, amount, created_by) values (p_group, p_from, p_to, round(p_amount, 2), uid);
+  if p_period is null or p_period <> date_trunc('month', p_period)::date
+     or p_period > (date_trunc('month', now()) + interval '1 month')::date or p_period < date '2026-01-01' then
+    raise exception 'Lună invalidă.' using errcode = '22023';
+  end if;
+  insert into public.payments (group_id, period, from_id, to_id, amount, created_by) values (p_group, p_period, p_from, p_to, round(p_amount, 2), uid);
 end $$;
 
 create or replace function public.delete_payment(p_id uuid)
@@ -499,9 +592,9 @@ begin
   end loop;
 end $$;
 grant usage on schema public to authenticated;
-grant select on public.groups, public.group_members, public.challenges, public.proofs, public.votes, public.payments, public.challenge_messages to authenticated;
+grant select on public.groups, public.group_members, public.challenges, public.proofs, public.votes, public.payments, public.challenge_messages, public.challenge_offers to authenticated;
 
-alter publication supabase_realtime add table public.groups, public.group_members, public.challenge_messages;
+alter publication supabase_realtime add table public.groups, public.group_members, public.challenge_messages, public.challenge_offers;
 
 commit;
 
