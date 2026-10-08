@@ -39,7 +39,7 @@
     session: null, me: null,
     groups: [], gid: null,
     members: {}, challenges: [], payments: [], proofs: [], votes: {}, messages: [], offers: [], invites: [], photoUrls: {}, newInvite: new Set(), addInvite: new Set(),
-    tab: "list", month: null, openId: null, kind: "duel", stake: 10, mode: "login", channel: null, loaded: false, busy: false
+    tab: "list", month: null, openId: null, kind: "duel", stake: 10, deadline: "", dlView: null, mode: "login", channel: null, loaded: false, busy: false
   };
   const curGroup = () => S.groups.find(g => g.id === S.gid) || null;
 
@@ -609,7 +609,7 @@
   function renderAll() {
     if (!S.me) return;
     if (!S.gid) { renderStart(); return; }
-    renderTop(); renderList(); renderLedger(); renderDetail(); renderAccount(); renderTargets();
+    renderTop(); renderList(); renderLedger(); renderDetail(); renderAccount(); renderTargets(); renderDeadline();
     if (!$("startView").hidden || !$("loading").hidden || !$("authView").hidden) go(S.tab);
   }
 
@@ -639,6 +639,54 @@
   function renderStakeChips() {
     const custom = $("nStake").value.trim();
     $("stakeChips").innerHTML = [5, 10, 20, 50].map(v => `<button type="button" data-stake="${v}" aria-pressed="${!custom && S.stake === v}">£${v}</button>`).join("");
+  }
+
+  // ---------- deadline calendar ----------
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const isoDay = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const todayIso = () => isoDay(new Date());
+  const addDays = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return isoDay(d); };
+  const addMonth = () => { const d = new Date(); d.setHours(12, 0, 0, 0); const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + 1); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); return isoDay(d); };
+  const endOfMonth = () => { const d = new Date(); return isoDay(new Date(d.getFullYear(), d.getMonth() + 1, 0, 12)); };
+  const daysUntil = (iso) => { const [y, m, d] = iso.split("-").map(Number); const a = new Date(); return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 864e5); };
+  function setDeadline(v) {
+    S.deadline = v || "";
+    if (S.deadline) { const [y, m] = S.deadline.split("-").map(Number); S.dlView = [y, m - 1]; }
+    renderDeadline();
+  }
+  function renderDeadline() {
+    const box = $("dlPicker"); if (!box) return;
+    const now = new Date(); const today = todayIso();
+    if (S.deadline && S.deadline < today) S.deadline = "";
+    if (!S.dlView) S.dlView = [now.getFullYear(), now.getMonth()];
+    let [vy, vm] = S.dlView;
+    const minY = now.getFullYear(), minM = now.getMonth();
+    if (vy * 12 + vm < minY * 12 + minM) { vy = minY; vm = minM; S.dlView = [vy, vm]; }
+    const maxIdx = minY * 12 + minM + 24;
+    const quick = [["dl.week", addDays(7)], ["dl.twoWeeks", addDays(14)], ["dl.month", addMonth()], ["dl.endMonth", endOfMonth()]];
+    let h = `<div class="dlsum"><span class="dlwhen">${S.deadline
+      ? esc(cap(new Date(S.deadline + "T12:00:00").toLocaleDateString(I.locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" })))
+      : esc(t("dl.none"))}</span>`;
+    if (S.deadline) { const n = daysUntil(S.deadline); h += `<span class="dlleft">${esc(n === 0 ? t("dl.today") : n === 1 ? t("dl.tomorrow") : t("dl.inDays", { n }))}</span>`; }
+    h += `</div><div class="chips dlquick">` + quick.map(([k, v]) => `<button type="button" data-dl="${v}" aria-pressed="${S.deadline === v}">${esc(t(k))}</button>`).join("")
+      + `<button type="button" data-dl="none" aria-pressed="${!S.deadline}">${esc(t("dl.noneBtn"))}</button></div>`;
+    const first = new Date(vy, vm, 1, 12);
+    const title = cap(first.toLocaleDateString(I.locale, { month: "long", year: "numeric" }));
+    const idx = vy * 12 + vm;
+    h += `<div class="cal"><div class="calhead"><button type="button" class="mnav" data-dlnav="-1" ${idx <= minY * 12 + minM ? "disabled" : ""} aria-label="${esc(t("ledger.prev"))}">‹</button><span class="calmonth">${esc(title)}</span><button type="button" class="mnav" data-dlnav="1" ${idx >= maxIdx ? "disabled" : ""} aria-label="${esc(t("ledger.next"))}">›</button></div><div class="calgrid">`;
+    const mon = new Date(2024, 0, 1, 12); // a Monday
+    for (let i = 0; i < 7; i++) { const d = new Date(mon); d.setDate(1 + i); h += `<span class="calwd">${esc(d.toLocaleDateString(I.locale, { weekday: "narrow" }))}</span>`; }
+    const lead = (first.getDay() + 6) % 7;
+    for (let i = 0; i < lead; i++) h += `<span></span>`;
+    const days = new Date(vy, vm + 1, 0).getDate();
+    for (let d = 1; d <= days; d++) {
+      const iso = `${vy}-${pad2(vm + 1)}-${pad2(d)}`;
+      const past = iso < today;
+      const label = new Date(vy, vm, d, 12).toLocaleDateString(I.locale, { weekday: "long", day: "numeric", month: "long" });
+      h += `<button type="button" class="calday${iso === today ? " today" : ""}" data-dl="${iso}" aria-pressed="${S.deadline === iso}" aria-label="${esc(label)}" ${past ? "disabled" : ""}>${d}</button>`;
+    }
+    h += `</div></div>`;
+    box.innerHTML = h;
   }
 
   // ---------- actions ----------
@@ -698,6 +746,8 @@
     else if (b.dataset.kind) setKind(b.dataset.kind);
     else if (b.dataset.logout !== undefined) { unsubscribe(); await sb.auth.signOut(); }
     else if (b.dataset.month) { S.month = b.dataset.month; renderLedger(); window.scrollTo(0, 0); }
+    else if (b.dataset.dl) setDeadline(b.dataset.dl === "none" ? "" : b.dataset.dl);
+    else if (b.dataset.dlnav) { const [y, m] = S.dlView || [new Date().getFullYear(), new Date().getMonth()]; const n = y * 12 + m + Number(b.dataset.dlnav); S.dlView = [Math.floor(n / 12), n % 12]; renderDeadline(); }
     else if (b.dataset.stake) { S.stake = +b.dataset.stake; $("nStake").value = ""; renderStakeChips(); }
     else if (b.dataset.vote) { if (S.openId) await rpc("cast_vote", { p_id: S.openId, p_pick: b.dataset.vote }, t("toast.voted")); }
     else if (b.dataset.paid !== undefined) {
@@ -722,7 +772,7 @@
   });
   window.addEventListener("cp-lang", () => {
     setMode(S.mode);
-    renderStakeChips();
+    renderStakeChips(); renderDeadline();
     if (S.me && S.gid && S.loaded) renderAll();
   });
 
@@ -758,11 +808,11 @@
     try {
       const file = $("nPhoto").files && $("nPhoto").files[0];
       if (file) { $("createBtn").textContent = t("photo.uploading"); photo = await uploadPhoto(file, "challenge"); }
-      const args = { p_group: S.gid, p_title: title, p_descr: $("nDesc").value.trim(), p_kind: S.kind, p_stake: r2(stake), p_deadline: $("nDeadline").value || null, p_photo_path: photo };
+      const args = { p_group: S.gid, p_title: title, p_descr: $("nDesc").value.trim(), p_kind: S.kind, p_stake: r2(stake), p_deadline: S.deadline || null, p_photo_path: photo };
       if (target) args.p_target = target;
       if (S.newInvite.size) args.p_invite = [...S.newInvite];
       const r = await rpc("create_challenge_v2", args, t("toast.launched"));
-      if (r.ok) { $("newForm").reset(); S.stake = 10; S.newInvite = new Set(); setKind("duel"); renderStakeChips(); go("list"); if (r.data) openDetail(r.data); }
+      if (r.ok) { $("newForm").reset(); S.stake = 10; S.newInvite = new Set(); S.dlView = null; setDeadline(""); setKind("duel"); renderStakeChips(); go("list"); if (r.data) openDetail(r.data); }
       else if (r.error) msg.textContent = errText(r.error);
     } catch (err) { msg.textContent = err.message || errText(err); }
     finally { $("createBtn").disabled = false; $("createBtn").textContent = t("new.launch"); }

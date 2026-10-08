@@ -16,8 +16,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="style.css?v=20261008-7">
-<script src="i18n.js?v=20261008-7"></script>
+<link rel="stylesheet" href="style.css?v=20261008-8">
+<script src="i18n.js?v=20261008-8"></script>
 </head>
 <body>
 <header id="topbar">
@@ -84,7 +84,7 @@
       <div class="chips" id="stakeChips"></div>
       <input id="nStake" class="mono" inputmode="decimal" data-i18n-ph="new.otherPh" placeholder="Other amount, £" data-i18n-aria="new.otherAria" aria-label="Other amount in pounds">
     </div>
-    <div class="field"><label for="nDeadline" data-i18n="new.deadline">Deadline (optional)</label><input id="nDeadline" type="date"></div>
+    <div class="field"><label id="dlLabel" data-i18n="new.deadline">Deadline (optional)</label><div id="dlPicker" class="dlpick" role="group" aria-labelledby="dlLabel"></div></div>
     <button class="btn block" type="submit" id="createBtn" data-i18n="new.launch">Launch challenge</button>
     <p class="formmsg" id="newMsg" role="alert"></p>
   </form>
@@ -204,8 +204,8 @@
   </form>
 </template>
 
-<script src="config.js?v=20261008-7"></script>
+<script src="config.js?v=20261008-8"></script>
 <script src="vendor/supabase-2.117.0.js"></script>
-<script src="app.js?v=20261008-7"></script>
+<script src="app.js?v=20261008-8"></script>
 </body>
 </html>
