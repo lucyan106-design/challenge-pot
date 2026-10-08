@@ -4,4 +4,4 @@ Challenge-uri între prieteni, cu mize în £. Aplicația ține doar evidența (
 
 - Site: https://lucyan106-design.github.io/challenge-pot/
 - Date: Supabase (proiectul „Lucian Challenges Friends”), protejate cu row-level security
-- Baza de date: `database/supabase.sql`
+- Baza de date: `database/supabase.sql`, apoi `database/002_groups.sql` (grupuri, poză la challenge, chat)

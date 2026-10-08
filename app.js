@@ -5,7 +5,9 @@
   const r2 = (n) => Math.round(Number(n) * 100) / 100;
   const gbp = (n) => { const v = r2(n); return (v < 0 ? "-£" : "£") + (Number.isInteger(v) ? Math.abs(v).toString() : Math.abs(v).toFixed(2)); };
   const fmtDate = (d) => { if (!d) return "fără termen"; try { return new Date(d + "T12:00:00").toLocaleDateString("ro-RO", { day: "numeric", month: "short" }); } catch { return d; } };
+  const fmtTime = (t) => { try { const d = new Date(t); const today = new Date().toDateString() === d.toDateString(); return d.toLocaleString("ro-RO", today ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
   const toast = (msg) => { const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); };
+  const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
   const errText = (e) => {
     const m = (e && (e.message || e.error_description)) || "";
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return "Nu e conexiune la internet. Încearcă din nou.";
@@ -14,7 +16,7 @@
     if (/Password should be at least/i.test(m)) return "Parola trebuie să aibă minim 6 caractere.";
     if (/valid email|invalid format|Unable to validate email/i.test(m)) return "Adresa de email nu pare corectă.";
     if (/rate limit|too many/i.test(m)) return "Prea multe încercări. Așteaptă un minut.";
-    if (/Email not confirmed/i.test(m)) return "Contul nu e confirmat. Spune-i administratorului.";
+    if (/Email not confirmed/i.test(m)) return "Contul nu e confirmat. Spune-i lui Lucian.";
     if (/JWT|token/i.test(m)) return "Sesiunea a expirat. Intră din nou.";
     return m || "N-a mers. Încearcă din nou.";
   };
@@ -29,17 +31,23 @@
   });
 
   const S = {
-    session: null, me: null, members: {}, challenges: [], payments: [], proofs: {}, votes: {}, photoUrls: {},
+    session: null, me: null,
+    groups: [],          // [{id,name,nick,is_admin}]
+    gid: null,           // current group id
+    members: {}, challenges: [], payments: [], proofs: {}, votes: {}, messages: [], photoUrls: {},
     tab: "list", openId: null, kind: "duel", stake: 10, mode: "login", channel: null, loaded: false, busy: false
   };
   const STATUS = { open: "Se strâng mizele", active: "În desfășurare", voting: "La vot", settled: "Închis", cancelled: "Anulat" };
+  const curGroup = () => S.groups.find(g => g.id === S.gid) || null;
 
   // ---------- views ----------
-  const VIEWS = ["loading", "authView", "joinView", "tabList", "tabNew", "tabLedger"];
+  const VIEWS = ["loading", "authView", "startView", "tabList", "tabNew", "tabLedger"];
   function show(view) {
     VIEWS.forEach(v => { $(v).hidden = v !== view; });
-    $("nav").hidden = !["tabList", "tabNew", "tabLedger"].includes(view);
-    $("meBtn").hidden = !S.me || !S.members[S.me];
+    const inGroup = ["tabList", "tabNew", "tabLedger"].includes(view);
+    $("nav").hidden = !inGroup;
+    $("meBtn").hidden = !inGroup;
+    $("grpBtn").hidden = !inGroup;
   }
   function go(tab) {
     S.tab = tab;
@@ -110,53 +118,81 @@
     finally { S.busy = false; }
   }
 
+  async function loadGroups() {
+    const [mine, groups] = await Promise.all([
+      sb.from("group_members").select("group_id,nick,is_admin").eq("user_id", S.me),
+      sb.from("groups").select("id,name").order("created_at", { ascending: true })
+    ]);
+    const err = mine.error || groups.error;
+    if (err) throw err;
+    const byId = {}; (groups.data || []).forEach(g => { byId[g.id] = g; });
+    S.groups = (mine.data || []).filter(m => byId[m.group_id])
+      .map(m => ({ id: m.group_id, name: byId[m.group_id].name, nick: m.nick, is_admin: m.is_admin }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ro"));
+    if (!S.groups.some(g => g.id === S.gid)) {
+      const saved = store.get("cp-group-" + S.me);
+      S.gid = (S.groups.find(g => g.id === saved) || S.groups[0] || {}).id || null;
+    }
+  }
+
   let loadSeq = 0;
   async function loadAll() {
     const seq = ++loadSeq;
-    const [m, c, p] = await Promise.all([
-      sb.from("members").select("user_id,nick,is_admin"),
-      sb.from("challenges").select("*").order("created_at", { ascending: false }),
-      sb.from("payments").select("*").order("created_at", { ascending: false })
-    ]);
+    try { await loadGroups(); } catch (e) { banner(errText(e)); return; }
     if (seq !== loadSeq) return;
+    if (!S.gid) { S.loaded = true; renderStart(); return; }
+    const gid = S.gid;
+    const [m, c, p] = await Promise.all([
+      sb.from("group_members").select("user_id,nick,is_admin").eq("group_id", gid),
+      sb.from("challenges").select("*").eq("group_id", gid).order("created_at", { ascending: false }),
+      sb.from("payments").select("*").eq("group_id", gid).order("created_at", { ascending: false })
+    ]);
+    if (seq !== loadSeq || gid !== S.gid) return;
     const err = m.error || c.error || p.error;
     if (err) { banner(errText(err)); return; }
     clearBanner();
     S.members = {}; (m.data || []).forEach(r => { S.members[r.user_id] = r; });
     S.challenges = c.data || []; S.payments = p.data || [];
+    await signPhotos(S.challenges.map(x => x.photo_path));
     if (S.openId) await loadDetail(S.openId);
     S.loaded = true;
     renderAll();
   }
+  async function signPhotos(paths) {
+    const need = [...new Set(paths.filter(x => x && !S.photoUrls[x]))];
+    if (!need.length) return;
+    try {
+      const { data } = await sb.storage.from("proofs").createSignedUrls(need, 60 * 60 * 6);
+      (data || []).forEach(d => { if (d.signedUrl) S.photoUrls[d.path] = d.signedUrl; });
+    } catch {}
+  }
   async function loadDetail(id) {
-    const [p, v] = await Promise.all([
+    const c = S.challenges.find(x => x.id === id);
+    const isPlayer = c ? playersOf(c).includes(S.me) : false;
+    const [p, v, msg] = await Promise.all([
       sb.from("proofs").select("*").eq("challenge_id", id),
-      sb.from("votes").select("*").eq("challenge_id", id)
+      sb.from("votes").select("*").eq("challenge_id", id),
+      isPlayer ? sb.from("challenge_messages").select("*").eq("challenge_id", id).order("created_at", { ascending: true }) : Promise.resolve({ data: [] })
     ]);
     if (S.openId !== id) return;
     S.proofs = {}; (p.data || []).forEach(r => { S.proofs[r.user_id] = r; });
     S.votes = {}; (v.data || []).forEach(r => { S.votes[r.voter_id] = r; });
-    const paths = Object.values(S.proofs).map(r => r.photo_path).filter(x => x && !S.photoUrls[x]);
-    if (paths.length) {
-      const { data } = await sb.storage.from("proofs").createSignedUrls(paths, 60 * 60 * 6);
-      (data || []).forEach(d => { if (d.signedUrl) S.photoUrls[d.path] = d.signedUrl; });
-    }
+    S.messages = msg.data || [];
+    await signPhotos(Object.values(S.proofs).map(r => r.photo_path));
   }
 
   let reloadTimer = null;
   function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => { loadAll().catch(() => {}); }, 250); }
   function subscribe() {
     if (S.channel) return;
-    S.channel = sb.channel("pot")
-      .on("postgres_changes", { event: "*", schema: "public", table: "members" }, scheduleReload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "challenges" }, scheduleReload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "proofs" }, scheduleReload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "votes" }, scheduleReload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "payments" }, scheduleReload)
-      .subscribe();
+    let ch = sb.channel("pot");
+    for (const t of ["groups", "group_members", "challenges", "proofs", "votes", "payments", "challenge_messages"]) {
+      ch = ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
+    }
+    S.channel = ch.subscribe();
   }
   function unsubscribe() { if (S.channel) { sb.removeChannel(S.channel); S.channel = null; } }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && S.me && S.members[S.me]) scheduleReload(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && S.me) scheduleReload(); });
   window.addEventListener("online", () => { if (S.me) scheduleReload(); });
   window.addEventListener("offline", () => banner("Fără internet. Modificările nu se pot salva acum."));
 
@@ -164,16 +200,62 @@
   function banner(msg) { if (!bannerEl) { bannerEl = document.createElement("div"); bannerEl.className = "banner"; bannerEl.setAttribute("role", "alert"); document.body.appendChild(bannerEl); } bannerEl.textContent = msg; }
   function clearBanner() { if (bannerEl) { bannerEl.remove(); bannerEl = null; } }
 
+  // ---------- groups UI ----------
+  function groupFormsHtml() { return $("groupFormsTpl").innerHTML; }
+  function renderStart() {
+    closeSheets();
+    if (!$("startForms").children.length) $("startForms").innerHTML = groupFormsHtml();
+    show("startView");
+  }
+  function renderGroupsSheet() {
+    $("groupList").innerHTML = S.groups.map(g => `<button class="grow" data-switch="${esc(g.id)}">
+      <span class="nm">${esc(g.name)}<span class="sub">tu ești ${esc(g.nick)}${g.is_admin ? " · administrator" : ""}</span></span>
+      ${g.id === S.gid ? '<span class="tick" aria-label="grupul curent">✓</span>' : ""}</button>`).join("");
+    if (!$("groupForms").children.length) $("groupForms").innerHTML = groupFormsHtml();
+  }
+  async function switchGroup(id) {
+    if (id === S.gid) { closeSheets(); return; }
+    S.gid = id; store.set("cp-group-" + S.me, id);
+    S.members = {}; S.challenges = []; S.payments = []; S.openId = null;
+    closeSheets(); go("list");
+    $("listBody").innerHTML = `<p class="muted" style="margin-top:20px">Se încarcă…</p>`;
+    renderTop();
+    await loadAll();
+  }
+  async function submitGroupForm(form) {
+    const msg = form.querySelector(".formmsg"); msg.textContent = "";
+    const btn = form.querySelector("button[type=submit]");
+    const f = Object.fromEntries(new FormData(form).entries());
+    if (form.dataset.form === "join" && !String(f.code || "").trim()) { msg.textContent = "Scrie codul de invitație."; return; }
+    if (form.dataset.form === "create" && !String(f.name || "").trim()) { msg.textContent = "Scrie numele grupului."; return; }
+    if (!String(f.nick || "").trim()) { msg.textContent = "Scrie cum te cheamă în grup."; return; }
+    btn.disabled = true;
+    const { data, error } = form.dataset.form === "join"
+      ? await sb.rpc("join_group", { p_code: f.code, p_nick: f.nick })
+      : await sb.rpc("create_group", { p_name: f.name, p_nick: f.nick });
+    btn.disabled = false;
+    if (error) { msg.textContent = errText(error); return; }
+    form.reset();
+    toast(form.dataset.form === "join" ? "Ai intrat în grup" : "Grup creat. Invită-ți prietenii cu codul.");
+    S.gid = data; store.set("cp-group-" + S.me, data);
+    S.members = {}; S.challenges = []; S.payments = [];
+    closeSheets(); subscribe();
+    await loadAll();
+    go("list");
+    if (form.dataset.form === "create") openAccount();
+  }
+
   // ---------- render: list ----------
   function playersOf(c) { return c.kind === "personal" ? [c.creator, ...(c.backers || [])] : (c.participants || []); }
   function potOf(c) { return c.kind === "personal" ? (c.backers || []).length * Number(c.stake) : (c.participants || []).length * Number(c.stake); }
   function slipHtml(c) {
     const people = playersOf(c);
+    const thumb = c.photo_path && S.photoUrls[c.photo_path] ? `<img class="slip-thumb" src="${esc(S.photoUrls[c.photo_path])}" alt="" loading="lazy">` : "";
     return `<button class="slip" data-open="${esc(c.id)}">
       <div class="slip-main">
         <div class="slip-meta"><span class="pill ${esc(c.status)}">${esc(STATUS[c.status] || c.status)}</span><span>${c.kind === "personal" ? "Personală · " + esc(nameOf(c.creator)) : "Unul contra altuia"}</span></div>
-        <div class="slip-title">${esc(c.title)}</div>
-        <div class="slip-meta"><span class="faces">${people.slice(0, 6).map(id => face(id)).join("")}</span><span>${people.length} ${people.length === 1 ? "jucător" : "jucători"} · ${c.deadline ? "până pe " + esc(fmtDate(c.deadline)) : "fără termen"}</span></div>
+        <div class="slip-head">${thumb}<div><div class="slip-title">${esc(c.title)}</div>
+        <div class="slip-meta"><span class="faces">${people.slice(0, 6).map(id => face(id)).join("")}</span><span>${people.length} ${people.length === 1 ? "jucător" : "jucători"} · ${c.deadline ? "până pe " + esc(fmtDate(c.deadline)) : "fără termen"}</span></div></div></div>
       </div>
       <div class="slip-stake"><span class="lbl">miză</span><span class="amt">${esc(gbp(c.stake))}</span><span class="lbl">${c.kind === "personal" ? "în joc" : "pot"} ${esc(gbp(potOf(c)))}</span></div>
     </button>`;
@@ -190,6 +272,7 @@
     h += live.length ? `<div class="stack">${live.map(slipHtml).join("")}</div>`
       : `<div class="empty"><strong>Niciun challenge activ</strong>Apasă „+ Nou” și lansează prima provocare. Prietenii intră cu miza lor.</div>`;
     if (done.length) h += `<h2>Încheiate</h2><div class="stack">${done.map(slipHtml).join("")}</div>`;
+    if (Object.keys(S.members).length < 2) h += `<p class="note" style="margin-top:16px">Ești singur în grup deocamdată. Apasă pe numele tău, sus, ca să vezi codul de invitație.</p>`;
     $("listBody").innerHTML = h;
   }
 
@@ -208,7 +291,7 @@
     const ids = Object.keys(S.members).sort((a, b) => (bal[b] || 0) - (bal[a] || 0));
     if (ids.length) {
       h += `<h2>Clasament</h2><div class="card">${ids.map(id => { const v = r2(bal[id] || 0); return `<div class="bal">${face(id, "av")}<span class="nm">${esc(nameOf(id))}</span><span class="v ${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${esc(gbp(v))}</span></div>`; }).join("")}</div>
-      <p class="note">Clasamentul arată cât ai câștigat sau pierdut net, după plățile deja făcute.</p>`;
+      <p class="note">Clasamentul arată cât ai câștigat sau pierdut net în acest grup, după plățile deja făcute.</p>`;
     }
     const pays = S.payments.slice(0, 20);
     if (pays.length) h += `<h2>Plăți bifate</h2><div class="card">${pays.map(p => `<div class="bal"><span class="nm">${esc(nameOf(p.from_id))} → ${esc(nameOf(p.to_id))} <span class="muted">· ${esc(new Date(p.created_at).toLocaleDateString("ro-RO", { day: "numeric", month: "short" }))}</span></span><span class="v">${esc(gbp(p.amount))}</span>${p.created_by === S.me ? `<button class="linkbtn" data-unpay="${esc(p.id)}">anulează</button>` : ""}</div>`).join("")}</div>`;
@@ -222,24 +305,41 @@
   const tally = () => { const t = {}; for (const v of Object.values(S.votes)) t[v.pick] = (t[v.pick] || 0) + 1; return t; };
 
   async function openDetail(id) {
-    S.openId = id; S.proofs = {}; S.votes = {};
-    $("pText").value = ""; $("pPhoto").value = "";
+    S.openId = id; S.proofs = {}; S.votes = {}; S.messages = [];
+    $("pText").value = ""; $("pPhoto").value = ""; $("chatInput").value = "";
     $("detail").hidden = false; $("detail").scrollTop = 0;
     renderDetail();
     try { await loadDetail(id); } catch {}
-    renderDetail();
+    renderDetail(true);
   }
-  function closeSheets() { S.openId = null; $("detail").hidden = true; $("account").hidden = true; }
+  function closeSheets() { S.openId = null; $("detail").hidden = true; $("account").hidden = true; $("groupsSheet").hidden = true; }
 
-  function renderDetail() {
+  function renderChat(c, scroll) {
+    const isPlayer = playersOf(c).includes(S.me);
+    const open = c.status !== "cancelled";
+    $("chatBox").hidden = !isPlayer;
+    $("chatLocked").hidden = isPlayer;
+    if (!isPlayer) return;
+    const list = $("chatList");
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    list.innerHTML = S.messages.length ? S.messages.map(m => `<div class="msg ${m.user_id === S.me ? "mine" : ""}">
+        <span class="who">${m.user_id === S.me ? "" : `<b>${esc(nameOf(m.user_id))}</b>`}<span>${esc(fmtTime(m.created_at))}</span></span>
+        <span class="bubble">${esc(m.body)}</span></div>`).join("")
+      : `<div class="chat-empty">Niciun mesaj încă. Scrie primul.</div>`;
+    if (scroll || atBottom) list.scrollTop = list.scrollHeight;
+    $("chatForm").hidden = !open;
+  }
+
+  function renderDetail(scrollChat) {
     if (!S.openId) return;
     const c = S.challenges.find(x => x.id === S.openId);
-    if (!c) { $("detailBody").innerHTML = `<div class="empty" style="margin-top:12px"><strong>Challenge-ul nu mai există</strong></div>`; $("detailActions").innerHTML = ""; $("proofForm").hidden = true; return; }
+    if (!c) { $("detailBody").innerHTML = `<div class="empty" style="margin-top:12px"><strong>Challenge-ul nu mai există</strong></div>`; $("detailActions").innerHTML = ""; $("proofForm").hidden = true; $("chatBox").hidden = true; $("chatLocked").hidden = true; return; }
     const isP = c.kind === "personal";
     const players = playersOf(c);
     const inIt = players.includes(S.me);
     let h = `<span class="pill ${esc(c.status)}">${esc(STATUS[c.status])}</span>
       <h1 class="d-title">${esc(c.title)}</h1>
+      ${c.photo_path && S.photoUrls[c.photo_path] ? `<a href="${esc(S.photoUrls[c.photo_path])}" target="_blank" rel="noopener"><img class="cover" src="${esc(S.photoUrls[c.photo_path])}" alt="Poza challenge-ului"></a>` : ""}
       ${c.descr ? `<p style="margin:0 0 12px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(c.descr)}</p>` : ""}
       <div class="card"><dl class="kv">
         <dt>Tip</dt><dd>${isP ? `Personală: ${esc(nameOf(c.creator))} încearcă, ceilalți pariază contra` : "Unul contra altuia, câștigătorul ia potul"}</dd>
@@ -262,7 +362,7 @@
       const cast = Object.keys(S.votes).length, need = votesNeeded(c);
       h += `<h2>Vot · ${cast} din ${eligibleVoters(c).length}</h2>
         <div class="stack">${options.map(([k, label]) => `<button class="vote" data-vote="${esc(k)}" aria-pressed="${my === k}" ${canVote ? "" : "disabled"}>${!isP ? face(k) : ""}<span class="nm">${esc(label)}</span><span class="cnt">${t[k] || 0}</span></button>`).join("")}</div>
-        <p class="note">${isP ? `Votează toată lumea în afară de ${esc(nameOf(c.creator))}.` : "Votează toată lumea din grup; nu poți vota pentru tine."} Votul se poate închide după ${need} ${need === 1 ? "vot" : "voturi"}. Îți poți schimba votul până atunci.</p>`;
+        <p class="note">${isP ? `Votează tot grupul în afară de ${esc(nameOf(c.creator))}.` : "Votează tot grupul; nu poți vota pentru tine."} Votul se poate închide după ${need} ${need === 1 ? "vot" : "voturi"}. Îți poți schimba votul până atunci.</p>`;
     }
     if (c.status === "settled") {
       const tr = transfersFor(c);
@@ -298,24 +398,35 @@
       a.push(`<button class="btn block" data-act="settle" ${cast >= need ? "" : "disabled"}>Închide votul și calculează</button>`);
     }
     $("detailActions").innerHTML = a.join("");
+    renderChat(c, scrollChat);
   }
 
-  function renderAccount() {
-    const me = S.members[S.me];
-    $("accEmail").textContent = (S.session && S.session.user && S.session.user.email) || "";
-    if (me && document.activeElement !== $("accNick")) $("accNick").value = me.nick;
-    $("adminCard").hidden = !(me && me.is_admin);
+  // ---------- account ----------
+  async function openAccount() {
+    $("account").hidden = false; renderAccount();
+    const { data, error } = await sb.rpc("get_invite_code", { p_group: S.gid });
+    $("inviteCode").textContent = error ? "—" : data;
   }
-  function renderMe() {
+  function renderAccount() {
+    const g = curGroup();
+    $("accEmail").textContent = (S.session && S.session.user && S.session.user.email) || "";
+    $("accTitle").textContent = g ? g.name : "Contul meu";
+    if (g && document.activeElement !== $("accNick")) $("accNick").value = g.nick;
+    if (g && document.activeElement !== $("grpRename")) $("grpRename").value = g.name;
+    $("adminTools").hidden = !(g && g.is_admin);
+  }
+  function renderTop() {
+    const g = curGroup();
+    $("grpName").textContent = g ? g.name : "";
     const me = S.members[S.me];
-    if (!me) return;
-    $("meBtn").innerHTML = `${face(S.me, "av")}<span>${esc(me.nick)}</span>`;
+    $("meBtn").innerHTML = me ? `${face(S.me, "av")}<span>${esc(me.nick)}</span>` : "";
   }
   function renderAll() {
     if (!S.me) return;
-    if (!S.members[S.me]) { if (S.loaded) show("joinView"); return; }
-    renderMe(); renderList(); renderLedger(); renderDetail(); renderAccount();
-    if (!$("joinView").hidden || !$("loading").hidden || !$("authView").hidden) go(S.tab);
+    if (!S.gid) { renderStart(); return; }
+    renderTop(); renderList(); renderLedger(); renderDetail(); renderAccount();
+    if (!$("groupsSheet").hidden) renderGroupsSheet();
+    if (!$("startView").hidden || !$("loading").hidden || !$("authView").hidden) go(S.tab);
   }
 
   // ---------- actions ----------
@@ -330,7 +441,6 @@
     const [fn, msg] = map[kind];
     await rpc(fn, { p_id: c.id }, msg);
   }
-  // two-tap confirm for destructive actions (no browser dialogs)
   let armed = null, armTimer = null;
   function confirmInline(key) {
     if (armed === key) { armed = null; clearTimeout(armTimer); return true; }
@@ -345,7 +455,6 @@
   }
 
   async function shrinkImage(file) {
-    // returns a JPEG blob ≤ ~1600px; falls back to the original if the browser can't decode it
     if (!file.type.startsWith("image/") || file.size < 900 * 1024) return file;
     try {
       const bmp = await createImageBitmap(file);
@@ -357,6 +466,15 @@
       return blob || file;
     } catch { return file; }
   }
+  async function uploadPhoto(file, tag) {
+    const blob = await shrinkImage(file);
+    if (blob.size > 10 * 1024 * 1024) throw new Error("Poza e prea mare (maxim 10 MB).");
+    const ext = blob.type === "image/jpeg" ? "jpg" : ((file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg");
+    const path = `${S.me}/${tag}-${Date.now()}.${ext}`;
+    const up = await sb.storage.from("proofs").upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: false });
+    if (up.error) throw new Error(/mime|type/i.test(up.error.message) ? "Formatul pozei nu e acceptat. Folosește JPG sau PNG." : errText(up.error));
+    return path;
+  }
 
   // ---------- events ----------
   document.addEventListener("click", async (e) => {
@@ -365,36 +483,38 @@
     else if (t.dataset.tab) { closeSheets(); go(t.dataset.tab); }
     else if (t.dataset.act) act(t.dataset.act);
     else if (t.dataset.close !== undefined) closeSheets();
+    else if (t.dataset.switch) switchGroup(t.dataset.switch);
     else if (t.dataset.logout !== undefined) { unsubscribe(); await sb.auth.signOut(); }
     else if (t.dataset.stake) { S.stake = +t.dataset.stake; $("nStake").value = ""; renderStakeChips(); }
     else if (t.dataset.vote) { if (S.openId) await rpc("cast_vote", { p_id: S.openId, p_pick: t.dataset.vote }, "Vot înregistrat"); }
     else if (t.dataset.paid !== undefined) {
       const d = S._debts && S._debts[+t.dataset.paid]; if (!d) return;
       if (!confirmInline("pay" + t.dataset.paid)) return;
-      await rpc("record_payment", { p_from: d.from, p_to: d.to, p_amount: d.amount }, "Plată bifată");
+      await rpc("record_payment", { p_group: S.gid, p_from: d.from, p_to: d.to, p_amount: d.amount }, "Plată bifată");
     }
     else if (t.dataset.unpay) { if (!confirmInline("unpay" + t.dataset.unpay)) return; await rpc("delete_payment", { p_id: t.dataset.unpay }, "Plată anulată"); }
   });
+  document.addEventListener("submit", (e) => {
+    const form = e.target.closest("form[data-form]");
+    if (!form) return;
+    e.preventDefault(); submitGroupForm(form);
+  });
 
-  $("meBtn").onclick = async () => {
-    $("account").hidden = false; renderAccount();
-    const me = S.members[S.me];
-    if (me && me.is_admin) {
-      const { data, error } = await sb.rpc("get_invite_code");
-      $("inviteCode").textContent = error ? "—" : data;
-    }
-  };
+  $("grpBtn").onclick = () => { $("groupsSheet").hidden = false; renderGroupsSheet(); };
+  $("meBtn").onclick = openAccount;
   $("copyInvite").onclick = async () => {
-    const text = `Hai în Challenge Pot: ${location.origin + location.pathname.replace(/index\.html$/, "")}\nFă-ți cont, apoi intră cu codul: ${$("inviteCode").textContent}`;
+    const g = curGroup();
+    const text = `Hai în grupul „${g ? g.name : ""}” pe Challenge Pot: ${location.origin + location.pathname.replace(/index\.html$/, "")}\nFă-ți cont, apoi intră cu codul: ${$("inviteCode").textContent}`;
     try { await navigator.clipboard.writeText(text); toast("Invitația e copiată. Lipește-o pe WhatsApp."); }
     catch { toast("Copiază manual codul de mai sus."); }
   };
-  $("codeForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const r = await rpc("set_invite_code", { p_code: $("newCode").value }, "Cod schimbat");
-    if (r.ok) { $("newCode").value = ""; const { data } = await sb.rpc("get_invite_code"); if (data) $("inviteCode").textContent = data; }
-  });
-  $("nickForm").addEventListener("submit", async (e) => { e.preventDefault(); await rpc("set_nick", { p_nick: $("accNick").value }, "Nume salvat"); });
+  $("newCodeBtn").onclick = async () => {
+    if (!confirmInline("newcode")) return;
+    const r = await rpc("new_invite_code", { p_group: S.gid }, "Cod nou generat");
+    if (r.ok && r.data) $("inviteCode").textContent = r.data;
+  };
+  $("renameForm").addEventListener("submit", async (e) => { e.preventDefault(); await rpc("rename_group", { p_group: S.gid, p_name: $("grpRename").value }, "Nume salvat"); });
+  $("nickForm").addEventListener("submit", async (e) => { e.preventDefault(); await rpc("set_nick", { p_group: S.gid, p_nick: $("accNick").value }, "Nume salvat"); });
 
   $("kindDuel").onclick = () => { S.kind = "duel"; $("kindDuel").setAttribute("aria-pressed", "true"); $("kindPersonal").setAttribute("aria-pressed", "false"); };
   $("kindPersonal").onclick = () => { S.kind = "personal"; $("kindPersonal").setAttribute("aria-pressed", "true"); $("kindDuel").setAttribute("aria-pressed", "false"); };
@@ -409,10 +529,15 @@
     if (!title) { msg.textContent = "Scrie ce trebuie făcut."; $("nTitle").focus(); return; }
     if (!Number.isFinite(stake) || stake < 0.5 || stake > 1000) { msg.textContent = "Miza trebuie să fie între £0.50 și £1000."; $("nStake").focus(); return; }
     $("createBtn").disabled = true;
-    const r = await rpc("create_challenge", { p_title: title, p_descr: $("nDesc").value.trim(), p_kind: S.kind, p_stake: r2(stake), p_deadline: $("nDeadline").value || null }, "Challenge lansat");
-    $("createBtn").disabled = false;
-    if (r.ok) { $("newForm").reset(); S.stake = 10; renderStakeChips(); go("list"); if (r.data) openDetail(r.data); }
-    else if (r.error) msg.textContent = errText(r.error);
+    let photo = null;
+    try {
+      const file = $("nPhoto").files && $("nPhoto").files[0];
+      if (file) { $("createBtn").textContent = "Se încarcă poza…"; photo = await uploadPhoto(file, "challenge"); }
+      const r = await rpc("create_challenge", { p_group: S.gid, p_title: title, p_descr: $("nDesc").value.trim(), p_kind: S.kind, p_stake: r2(stake), p_deadline: $("nDeadline").value || null, p_photo_path: photo }, "Challenge lansat");
+      if (r.ok) { $("newForm").reset(); S.stake = 10; renderStakeChips(); go("list"); if (r.data) openDetail(r.data); }
+      else if (r.error) msg.textContent = errText(r.error);
+    } catch (err) { msg.textContent = err.message || errText(err); }
+    finally { $("createBtn").disabled = false; $("createBtn").textContent = "Lansează challenge-ul"; }
   });
 
   $("pSend").onclick = async () => {
@@ -421,33 +546,26 @@
     const file = $("pPhoto").files && $("pPhoto").files[0];
     if (!text && !file) { toast("Scrie ceva sau adaugă o poză."); return; }
     $("pSend").disabled = true; $("pSend").textContent = file ? "Se încarcă poza…" : "Se trimite…";
-    let path = null;
     try {
-      if (file) {
-        const blob = await shrinkImage(file);
-        if (blob.size > 10 * 1024 * 1024) throw new Error("Poza e prea mare (maxim 10 MB).");
-        const ext = blob.type === "image/jpeg" ? "jpg" : ((file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg");
-        path = `${S.me}/${id}-${Date.now()}.${ext}`;
-        const up = await sb.storage.from("proofs").upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: false });
-        if (up.error) throw new Error(/mime|type/i.test(up.error.message) ? "Formatul pozei nu e acceptat. Folosește JPG sau PNG." : errText(up.error));
-      }
+      const path = file ? await uploadPhoto(file, id) : null;
       const r = await rpc("submit_proof", { p_id: id, p_body: text, p_photo_path: path }, "Dovadă trimisă");
       if (r.ok) { $("pText").value = ""; $("pPhoto").value = ""; }
     } catch (e) { toast(e.message || errText(e)); }
     finally { $("pSend").disabled = false; renderDetail(); }
   };
 
-  $("joinForm").addEventListener("submit", async (e) => {
+  $("chatForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const msg = $("joinMsg"); msg.textContent = "";
-    if (!$("jCode").value.trim()) { msg.textContent = "Scrie codul de invitație."; $("jCode").focus(); return; }
-    if (!$("jNick").value.trim()) { msg.textContent = "Scrie cum te cheamă."; $("jNick").focus(); return; }
-    $("joinBtn").disabled = true;
-    const { error } = await sb.rpc("join_group", { p_code: $("jCode").value, p_nick: $("jNick").value });
-    $("joinBtn").disabled = false;
-    if (error) { msg.textContent = errText(error); return; }
-    toast("Bine ai venit!");
-    subscribe(); await loadAll();
+    const id = S.openId; const body = $("chatInput").value.trim();
+    if (!id || !body) return;
+    $("chatSend").disabled = true;
+    const { error } = await sb.rpc("post_message", { p_id: id, p_body: body });
+    $("chatSend").disabled = false;
+    if (error) { toast(errText(error)); return; }
+    $("chatInput").value = "";
+    try { await loadDetail(id); } catch {}
+    renderDetail(true);
+    $("chatInput").focus();
   });
 
   // ---------- auth ----------
@@ -474,7 +592,6 @@
         const { data, error } = await sb.auth.signUp({ email, password });
         if (error) throw error;
         if (!data.session) {
-          // confirmation is switched on in Supabase, or the address already exists
           const r = await sb.auth.signInWithPassword({ email, password });
           if (r.error) throw new Error(/not confirmed/i.test(r.error.message) ? "Email not confirmed" : "already registered");
         }
@@ -491,14 +608,14 @@
     S.session = session;
     const uid = session && session.user ? session.user.id : null;
     if (!uid) {
-      S.me = null; S.members = {}; S.challenges = []; S.payments = []; S.loaded = false; unsubscribe(); closeSheets();
-      show("authView"); return;
+      S.me = null; S.gid = null; S.groups = []; S.members = {}; S.challenges = []; S.payments = []; S.loaded = false;
+      unsubscribe(); closeSheets(); show("authView"); return;
     }
     if (uid === S.me && S.loaded) return;
-    S.me = uid; S.loaded = false;
+    S.me = uid; S.loaded = false; S.gid = null;
     show("loading");
     try { await loadAll(); } catch (e) { banner(errText(e)); }
-    if (S.members[S.me]) subscribe(); else show("joinView");
+    subscribe();
   }
   sb.auth.onAuthStateChange((event, session) => {
     if (event === "TOKEN_REFRESHED") { S.session = session; return; }

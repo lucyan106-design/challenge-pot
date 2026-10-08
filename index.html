@@ -21,6 +21,7 @@
 <body>
 <header id="topbar">
   <div class="brand">Challenge <b>Pot</b></div>
+  <button class="grp" id="grpBtn" hidden aria-label="Schimbă grupul"><span id="grpName"></span><span aria-hidden="true">▾</span></button>
   <button class="me" id="meBtn" hidden aria-label="Contul meu"></button>
 </header>
 
@@ -46,20 +47,15 @@
       <button class="btn block" type="submit" id="authBtn">Intră</button>
       <p class="formmsg" id="authMsg" role="alert"></p>
     </form>
-    <p class="note" id="forgotNote">Ai uitat parola? Spune-i administratorului grupului, ți-o resetează el.</p>
+    <p class="note">Ai uitat parola? Spune-i lui Lucian, ți-o resetează el.</p>
   </div>
 </section>
 
-<!-- join -->
-<section class="wrap" id="joinView" hidden>
-  <div class="hero"><h1>Intră în grup cu <em>codul</em> primit.</h1><p class="muted">Codul de invitație ți-l dă cine te-a chemat.</p></div>
-  <form id="joinForm" class="card stack" novalidate>
-    <div class="field"><label for="jCode">Cod de invitație</label><input id="jCode" autocapitalize="characters" autocomplete="off" placeholder="ex: POT-ABC123"></div>
-    <div class="field"><label for="jNick">Cum te strigă prietenii?</label><input id="jNick" maxlength="24" autocomplete="nickname" placeholder="ex: Mihai"></div>
-    <button class="btn block" type="submit" id="joinBtn">Intră în grup</button>
-    <p class="formmsg" id="joinMsg" role="alert"></p>
-    <button class="btn ghost block" type="button" data-logout>Ieși din cont</button>
-  </form>
+<!-- no group yet -->
+<section class="wrap" id="startView" hidden>
+  <div class="hero"><h1>Alege-ți <em>grupul</em>.</h1><p class="muted">Intră cu codul primit de la prieteni sau fă un grup nou și trimite-le codul lui.</p></div>
+  <div class="stack" id="startForms"></div>
+  <button class="btn ghost block" type="button" data-logout>Ieși din cont</button>
 </section>
 
 <!-- tabs -->
@@ -74,6 +70,7 @@
     </div>
     <div class="field"><label for="nTitle">Provocarea</label><input id="nTitle" maxlength="90" placeholder="ex: Cine face mai mulți pași săptămâna asta"></div>
     <div class="field"><label for="nDesc">Reguli și cum se dovedește</label><textarea id="nDesc" maxlength="600" placeholder="ex: Screenshot din aplicația de pași duminică seara"></textarea></div>
+    <div class="field"><label for="nPhoto">Poză (opțional)</label><input id="nPhoto" type="file" accept="image/*"></div>
     <div class="field"><label>Miza de persoană</label>
       <div class="chips" id="stakeChips"></div>
       <input id="nStake" class="mono" inputmode="decimal" placeholder="Altă sumă, £" aria-label="Altă sumă în lire">
@@ -97,6 +94,25 @@
       <button class="btn block" id="pSend" type="button">Trimite dovada</button>
     </div>
     <div id="detailActions" class="stack"></div>
+    <div id="chatBox" hidden>
+      <h2>Chat</h2>
+      <div class="card chat" id="chatList" aria-live="polite"></div>
+      <form id="chatForm" class="chatform" novalidate>
+        <input id="chatInput" maxlength="500" autocomplete="off" placeholder="Scrie un mesaj…" aria-label="Mesaj">
+        <button class="btn" type="submit" id="chatSend">Trimite</button>
+      </form>
+    </div>
+    <p class="note" id="chatLocked" hidden>Chat-ul e doar pentru cei intrați în acest challenge.</p>
+  </div>
+</div>
+
+<!-- groups sheet -->
+<div class="sheet" id="groupsSheet" hidden>
+  <div class="wrap">
+    <button class="back" data-close>← Înapoi</button>
+    <h1 class="d-title">Grupurile mele</h1>
+    <div class="card" id="groupList"></div>
+    <div class="stack" id="groupForms"></div>
   </div>
 </div>
 
@@ -104,23 +120,26 @@
 <div class="sheet" id="account" hidden>
   <div class="wrap">
     <button class="back" data-close>← Înapoi</button>
-    <h1 class="d-title">Contul meu</h1>
+    <h1 class="d-title" id="accTitle">Contul meu</h1>
+    <div class="card stack">
+      <h2 style="margin:0">Invită prieteni în grup</h2>
+      <p class="note" style="margin:0">Trimite-le linkul și codul de mai jos. Își fac cont, apoi intră cu codul.</p>
+      <div class="codebox"><span class="mono" id="inviteCode">…</span><button class="btn sm ghost" type="button" id="copyInvite">Copiază invitația</button></div>
+      <div id="adminTools" class="stack" hidden>
+        <button class="btn ghost block" type="button" id="newCodeBtn">Generează cod nou</button>
+        <p class="note" style="margin:0">Codul vechi nu mai merge după schimbare. Cine e deja în grup rămâne.</p>
+        <form id="renameForm" class="stack" novalidate>
+          <div class="field"><label for="grpRename">Numele grupului</label><input id="grpRename" maxlength="40"></div>
+          <button class="btn ghost block" type="submit">Salvează numele grupului</button>
+        </form>
+      </div>
+    </div>
     <div class="card stack">
       <p class="muted" id="accEmail" style="margin:0"></p>
       <form id="nickForm" class="stack" novalidate>
-        <div class="field"><label for="accNick">Numele tău în grup</label><input id="accNick" maxlength="24"></div>
+        <div class="field"><label for="accNick">Numele tău în acest grup</label><input id="accNick" maxlength="24"></div>
         <button class="btn ghost block" type="submit">Salvează numele</button>
       </form>
-    </div>
-    <div class="card stack" id="adminCard" hidden>
-      <h2 style="margin:0">Invită prieteni</h2>
-      <p class="note" style="margin:0">Trimite-le linkul aplicației și codul de mai jos. Își fac cont, apoi intră cu codul.</p>
-      <div class="codebox"><span class="mono" id="inviteCode">…</span><button class="btn sm ghost" type="button" id="copyInvite">Copiază invitația</button></div>
-      <form id="codeForm" class="stack" novalidate>
-        <div class="field"><label for="newCode">Schimbă codul</label><input id="newCode" autocapitalize="characters" autocomplete="off" placeholder="Cod nou, 4–32 caractere"></div>
-        <button class="btn ghost block" type="submit">Schimbă codul</button>
-      </form>
-      <p class="note" style="margin:0">Codul vechi nu mai funcționează după schimbare. Cine e deja în grup rămâne.</p>
     </div>
     <div class="stack">
       <button class="btn warn block" type="button" data-logout>Ieși din cont</button>
@@ -133,6 +152,24 @@
   <button data-tab="new">+ Nou</button>
   <button data-tab="ledger">Socoteala</button>
 </div></nav>
+
+<template id="groupFormsTpl">
+  <form class="card stack" data-form="join" novalidate>
+    <h2 style="margin:0">Intră într-un grup</h2>
+    <div class="field"><label>Cod de invitație<input name="code" autocapitalize="characters" autocomplete="off" placeholder="ex: POT-ABC123"></label></div>
+    <div class="field"><label>Cum te strigă în grup?<input name="nick" maxlength="24" autocomplete="nickname" placeholder="ex: Mihai"></label></div>
+    <button class="btn block" type="submit">Intră în grup</button>
+    <p class="formmsg" role="alert"></p>
+  </form>
+  <form class="card stack" data-form="create" novalidate>
+    <h2 style="margin:0">Fă un grup nou</h2>
+    <div class="field"><label>Numele grupului<input name="name" maxlength="40" placeholder="ex: Fotbal de joi"></label></div>
+    <div class="field"><label>Cum te strigă în grup?<input name="nick" maxlength="24" autocomplete="nickname" placeholder="ex: Lucian"></label></div>
+    <button class="btn ghost block" type="submit">Creează grupul</button>
+    <p class="note" style="margin:0">Primești un cod pe care îl trimiți prietenilor.</p>
+    <p class="formmsg" role="alert"></p>
+  </form>
+</template>
 
 <script src="config.js"></script>
 <script src="vendor/supabase-2.117.0.js"></script>
