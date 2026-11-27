@@ -102,7 +102,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
     <div class="controls">
       <div class="bet">
         <button class="sm" id="lminus" aria-label="Mai puține linii">−</button>
-        <span><small>Linii</small><b id="nlines">10</b></span>
+        <span><small>Linii</small><b id="nlines">25</b></span>
         <button class="sm" id="lplus" aria-label="Mai multe linii">+</button>
       </div>
       <div class="bet">
@@ -123,7 +123,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
     <h2>Tabel câștiguri</h2>
     <table><thead><tr><th>Simbol</th><th>×3</th><th>×4</th><th>×5</th></tr></thead><tbody id="paytb"></tbody></table>
     <p><b>WILD</b> înlocuiește orice simbol, mai puțin BONUS. <b>BONUS</b> oriunde pe ecran: 3 dau 10 rotiri gratuite, 4 dau 15, 5 dau 20, plus miza totală ×2 / ×10 / ×50. În rotirile gratuite toate câștigurile se dublează și le poți reactiva.</p>
-    <p>Alegi câte linii joci (1–10) și miza pe linie. Miza totală e linii × miză pe linie. Câștigurile se plătesc doar pe liniile active, de la stânga la dreapta, ca multiplicator al mizei pe linie. Pe fiecare linie se plătește doar combinația cea mai mare. BONUS plătește oricum, indiferent de linii.</p>
+    <p>Alegi câte linii joci (1, 5, 10, 15, 20 sau 25) și miza pe linie. Miza totală e linii × miză pe linie. Câștigurile se plătesc doar pe liniile active, de la stânga la dreapta, ca multiplicator al mizei pe linie. Pe fiecare linie se plătește doar combinația cea mai mare. BONUS plătește oricum, indiferent de linii.</p>
     <div class="lines" id="linepics"></div>
   </section>
 </div>
@@ -144,8 +144,11 @@ const SYM = [
 ];
 const BY = Object.fromEntries(SYM.map(s=>[s.id,s]));
 const TOTAL = SYM.reduce((a,s)=>a+s.w,0);
-const LINES = [[1,1,1,1,1],[0,0,0,0,0],[2,2,2,2,2],[0,1,2,1,0],[2,1,0,1,2],[0,0,1,2,2],[2,2,1,0,0],[1,0,0,0,1],[1,2,2,2,1],[1,0,1,2,1]];
-const LINE_COL = ['#ffd54f','#ff7043','#4fc3f7','#81c784','#ba68c8','#f06292','#4dd0e1','#ffb74d','#aed581','#9575cd'];
+const LINES = [[1,1,1,1,1],[0,0,0,0,0],[2,2,2,2,2],[0,1,2,1,0],[2,1,0,1,2],[0,0,1,2,2],[2,2,1,0,0],[1,0,0,0,1],[1,2,2,2,1],[1,0,1,2,1],
+  [0,1,1,1,0],[2,1,1,1,2],[0,1,0,1,0],[2,1,2,1,2],[1,1,0,1,1],[1,1,2,1,1],[0,0,2,0,0],[2,2,0,2,2],[0,2,2,2,0],[2,0,0,0,2],
+  [1,2,1,0,1],[0,2,0,2,0],[2,0,2,0,2],[1,0,1,0,1],[1,2,1,2,1]];
+const LINE_COL = ['#ffd54f','#ff7043','#4fc3f7','#81c784','#ba68c8','#f06292','#4dd0e1','#ffb74d','#aed581','#9575cd',
+  ...Array.from({length:15}, (_,i) => `hsl(${(i*137.5+20)%360} 85% 63%)`)];
 const FS = {3:[10,2],4:[15,10],5:[20,50]};   // scatters: [free spins, total-bet multiplier]
 const rnd = () => { let r = Math.random()*TOTAL; for (const s of SYM) { if ((r -= s.w) < 0) return s.id; } return 'cherry'; };
 const grid = () => [0,1,2,3,4].map(() => [rnd(),rnd(),rnd()]);
@@ -161,7 +164,7 @@ function evalLine(syms){
   }
   return best;
 }
-function evaluate(g, lineBet, mult, nLines=10){
+function evaluate(g, lineBet, mult, nLines=25){
   const wins = []; let total = 0;
   LINES.slice(0,nLines).forEach((ln,i) => {
     const r = evalLine(ln.map((row,reel) => g[reel][row]));
@@ -190,15 +193,16 @@ const cellsHTML = col => col.map(id => `<div class="cell">${svg(id)}</div>`).joi
 const $ = id => document.getElementById(id);
 const LBETS = [1,2,5,10,20,50];
 
-let st = {credits:1000, lineBet:1, lines:10, sound:true, turbo:false};
+let st = {credits:1000, lineBet:1, lines:25, sound:true, turbo:false};
 try { Object.assign(st, JSON.parse(localStorage.getItem('brightSlots5')||'{}')); } catch(e){}
 delete st.bet;
 if (!LBETS.includes(st.lineBet)) st.lineBet = 1;
-if (!(st.lines>=1 && st.lines<=10)) st.lines = 10;
+const LSTEPS = [1,5,10,15,20,25];
+if (!LSTEPS.includes(st.lines)) st.lines = 25;
 const tb = () => st.lineBet*st.lines;
 const save = () => { try { localStorage.setItem('brightSlots5', JSON.stringify(st)); } catch(e){} };
 
-let spinning = false, auto = false, actx = null, fs = 0, fsTotal = 0, fsWin = 0, fsLB = 1, fsLines = 10, showTimer = null, bigResolve = null;
+let spinning = false, auto = false, actx = null, fs = 0, fsTotal = 0, fsWin = 0, fsLB = 1, fsLines = 25, showTimer = null, bigResolve = null;
 const reelsEl = $('reels'), linesEl = $('lines');
 const reels = [0,1,2,3,4].map(() => {
   const r = document.createElement('div'); r.className = 'reel';
@@ -368,7 +372,7 @@ function previewLines(){
   linesEl.innerHTML = LINES.slice(0,st.lines).map((ln,i) => `<polyline points="${linePath(i)}" fill="none" stroke="${LINE_COL[i]}" stroke-width="3" stroke-linejoin="round" opacity=".9"/>`).join('');
   clearTimeout(previewT); previewT = setTimeout(() => { if (!spinning) linesEl.innerHTML = ''; }, 1400);
 }
-const setLines = d => { if (spinning || fs) return; st.lines = Math.max(1, Math.min(10, st.lines + d)); beep(d>0?520:390,.05); render(); save(); previewLines(); msg(`Joci pe ${st.lines} ${st.lines===1?'linie':'linii'}`, true); };
+const setLines = d => { if (spinning || fs) return; const i = LSTEPS.indexOf(st.lines); st.lines = LSTEPS[Math.max(0, Math.min(LSTEPS.length-1, i + d))]; beep(d>0?520:390,.05); render(); save(); previewLines(); msg(`Joci pe ${st.lines} ${st.lines===1?'linie':'linii'}`, true); };
 $('lminus').addEventListener('click', () => setLines(-1));
 $('lplus').addEventListener('click', () => setLines(1));
 $('minus').addEventListener('click', () => setBet(-1));
