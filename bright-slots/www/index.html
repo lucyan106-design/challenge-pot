@@ -143,21 +143,23 @@ const SYM = [
   {id:'plum',   w:20, pay:[8,30,100],    name:'Prună'},
   {id:'bell',   w:14, pay:[12,50,150],  name:'Clopoțel'},
   {id:'bar',    w:10, pay:[20,75,250],  name:'BAR'},
-  {id:'seven',  w:6,  pay:[25,100,400], name:'Șeptar'},
+  {id:'seven',  w:11, pay:[20,80,300],  name:'Șeptar'},
   {id:'diamond',w:4,  pay:[50,200,1000],name:'Diamant'},
   {id:'wild',   w:4,  pay:[50,250,2000],name:'WILD'},
   {id:'scatter',w:3.4, pay:null,         name:'BONUS'}
 ];
 const BY = Object.fromEntries(SYM.map(s=>[s.id,s]));
-const TOTAL = SYM.reduce((a,s)=>a+s.w,0);
+// Luck by bet: smaller bet per line = more WILDs = higher payout rate
+const WILD_W = {1:5.8, 2:5.3, 5:4.8, 10:4.3, 20:3.9, 50:3.5};
+const weightsFor = lb => SYM.map(s => s.id==='wild' ? (WILD_W[lb] ?? 4) : s.w);
 const LINES = [[1,1,1,1,1],[0,0,0,0,0],[2,2,2,2,2],[0,1,2,1,0],[2,1,0,1,2],[0,0,1,2,2],[2,2,1,0,0],[1,0,0,0,1],[1,2,2,2,1],[1,0,1,2,1],
   [0,1,1,1,0],[2,1,1,1,2],[0,1,0,1,0],[2,1,2,1,2],[1,1,0,1,1],[1,1,2,1,1],[0,0,2,0,0],[2,2,0,2,2],[0,2,2,2,0],[2,0,0,0,2],
   [1,2,1,0,1],[0,2,0,2,0],[2,0,2,0,2],[1,0,1,0,1],[1,2,1,2,1]];
 const LINE_COL = ['#ffd54f','#ff7043','#4fc3f7','#81c784','#ba68c8','#f06292','#4dd0e1','#ffb74d','#aed581','#9575cd',
   ...Array.from({length:15}, (_,i) => `hsl(${(i*137.5+20)%360} 85% 63%)`)];
 const FS = {3:[10,2],4:[15,10],5:[20,50]};   // scatters: [free spins, total-bet multiplier]
-const rnd = () => { let r = Math.random()*TOTAL; for (const s of SYM) { if ((r -= s.w) < 0) return s.id; } return 'cherry'; };
-const grid = () => [0,1,2,3,4].map(() => [rnd(),rnd(),rnd()]);
+const rnd = (lb=5) => { const W = weightsFor(lb), T = W.reduce((a,b)=>a+b,0); let r = Math.random()*T; for (let i=0;i<SYM.length;i++){ if ((r -= W[i]) < 0) return SYM[i].id; } return 'cherry'; };
+const grid = (lb=5) => [0,1,2,3,4].map(() => [rnd(lb),rnd(lb),rnd(lb)]);
 function evalLine(syms){
   // best of: wild-only run, or run of first non-wild symbol (wilds substitute)
   let best = {mult:0,n:0,sym:null};
@@ -344,7 +346,7 @@ async function spin(){
   if (free) fs--; else st.credits -= bet;
   $('last').textContent = 0; render(); save();
   msg(free ? 'Rotire gratuită…' : 'Se învârte…', false);
-  const g = grid();
+  const g = grid(lineBet);
   const quick = st.turbo || free;
   await Promise.all(reels.map((r,i) => spinReel(r,i,g[i],quick)));
   const res = evaluate(g, lineBet, mult, nLines);
