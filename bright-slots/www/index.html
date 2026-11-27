@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#5b0f1a">
+<title>Bright Slots</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Archivo:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* VOICE: lively, warm casino fun — virtual credits only
+   IDEA: a fruit machine cabinet, lit bulbs round a 5-reel window
+   PICTURE: the 5×3 reels with paylines drawn over them on a win
+   COLOUR and TYPE: oxblood cabinet, brass gold, cream reels, violet for free spins; Rye marquee, Archivo controls
+   LAYOUT: one phone column: marquee, stats, reels, message, bet + spin, toggles, paytable */
+:root{color-scheme:light dark;--bg:light-dark(#7a1422,#2a060c);--cab:light-dark(#5b0f1a,#1c0408);--gold:#f2c14e;--gold2:#b9852a;--cream:#fff7e6;--ink:#2b0a10;--txt:#fff4dc;--vio:#7b2ff7;--h:clamp(54px,16.5vw,96px)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;background:radial-gradient(120% 80% at 50% 0%,light-dark(#a81d31,#4a0b15),var(--bg) 70%);color:var(--txt);font:16px/1.5 Archivo,system-ui,sans-serif;overflow-x:clip;display:flex;justify-content:center;-webkit-user-select:none;user-select:none}
+.wrap{width:100%;max-width:560px;padding:max(14px,env(safe-area-inset-top)) 10px max(36px,env(safe-area-inset-bottom))}
+.marquee{text-align:center;margin:4px 0 12px}
+.marquee h1{font:400 clamp(32px,9vw,48px)/1.05 Rye,Georgia,serif;margin:0;color:var(--gold);text-shadow:0 3px 0 var(--gold2),0 6px 18px #0008}
+.marquee p{margin:4px 0 0;font-size:13px;opacity:.8}
+.cab{background:linear-gradient(var(--cab),light-dark(#3d0911,#120205));border-radius:26px;padding:16px 10px 18px;box-shadow:inset 0 0 0 3px var(--gold2),inset 0 0 0 7px var(--cab),inset 0 0 0 9px var(--gold),0 20px 40px #0009;transition:background .4s}
+.cab.fs{background:linear-gradient(#3a0d7a,#14052e)}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.stat{background:#0006;border-radius:12px;padding:6px 10px;box-shadow:inset 0 0 0 1px #f2c14e55}
+.stat small{display:block;font-size:13px;opacity:.75}
+.stat b{font-size:clamp(17px,5vw,22px);font-variant-numeric:tabular-nums;color:var(--gold);white-space:nowrap}
+.window{position:relative;border-radius:16px;padding:9px;background:#140306;box-shadow:inset 0 0 0 3px var(--gold)}
+.bulbs{position:absolute;inset:-8px;pointer-events:none}
+.bulbs i{position:absolute;width:8px;height:8px;border-radius:50%;background:#ffe9a8;box-shadow:0 0 8px #ffd25e;animation:blink 1.2s infinite}
+.bulbs i:nth-child(odd){animation-delay:.6s}
+.win .bulbs i{animation-duration:.25s}
+@keyframes blink{50%{opacity:.25}}
+.reels{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;position:relative}
+.reel{height:calc(var(--h)*3);overflow:hidden;border-radius:8px;background:linear-gradient(#cfc2a8,var(--cream) 20%,var(--cream) 80%,#cfc2a8);position:relative}
+.reel::after{content:"";position:absolute;inset:0;background:linear-gradient(#0006,transparent 25%,transparent 75%,#0006);pointer-events:none}
+.strip{will-change:transform}
+.cell{height:var(--h);display:grid;place-items:center}
+.cell svg{width:80%;height:80%;filter:drop-shadow(0 2px 2px #0004)}
+.cell.hit svg{animation:pop .45s ease-in-out infinite alternate}
+.cell.dim{opacity:.35}
+@keyframes pop{to{transform:scale(1.14)}}
+#lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;overflow:visible}
+.fsbar{display:none;margin:12px 0 0;padding:8px 12px;border-radius:12px;background:var(--vio);color:#fff;text-align:center;font-weight:800;box-shadow:0 0 18px #7b2ff7aa}
+.cab.fs .fsbar{display:block}
+.msg{min-height:52px;margin:12px 0 6px;text-align:center;font-weight:800;font-size:clamp(18px,5.4vw,22px);color:var(--gold);line-height:1.2;display:grid;place-items:center}
+.msg.lose{color:var(--txt);opacity:.75;font-weight:500;font-size:16px}
+.controls{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center}
+.bet{display:flex;align-items:center;gap:4px;background:#0006;border-radius:14px;padding:6px;box-shadow:inset 0 0 0 1px #f2c14e55}
+.bet span{min-width:56px;text-align:center}
+.bet span small{display:block;font-size:13px;opacity:.75;line-height:1}
+.bet span b{font-size:20px;font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px;min-height:44px}
+button:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.sm{width:44px;background:var(--gold2);color:var(--ink);font-size:24px;font-weight:800}
+.spin{height:64px;font-size:21px;font-weight:800;color:var(--ink);background:linear-gradient(#ffe08a,var(--gold) 50%,var(--gold2));box-shadow:0 5px 0 #7a5410,0 10px 20px #0007;transition:transform .08s,box-shadow .08s}
+.spin:active{transform:translateY(4px);box-shadow:0 1px 0 #7a5410,0 4px 10px #0007}
+.spin:disabled{filter:grayscale(.6) brightness(.8);cursor:default}
+.cab.fs .spin{background:linear-gradient(#c9a6ff,#9b5cff 50%,#5a17c9);color:#fff;box-shadow:0 5px 0 #3a0d7a,0 10px 20px #0007}
+.row2{display:flex;gap:8px;margin-top:12px}
+.row2 button{flex:1;background:#0006;color:var(--txt);box-shadow:inset 0 0 0 1px #f2c14e66;font-weight:700;font-size:15px}
+.row2 button[aria-pressed=true]{background:var(--gold2);color:var(--ink)}
+.pay{margin-top:20px;background:#0005;border-radius:18px;padding:14px}
+.pay h2{font:400 22px/1.1 Rye,Georgia,serif;color:var(--gold);margin:0 0 10px}
+.pay table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.pay td,.pay th{padding:4px 6px;text-align:right;white-space:nowrap}
+.pay th{font-size:13px;opacity:.75;font-weight:500}
+.pay td:first-child,.pay th:first-child{text-align:left}
+.pay td:first-child{display:flex;align-items:center;gap:8px}
+.pay td svg{width:30px;height:30px;flex:none}
+.pay tr+tr td{border-top:1px solid #ffffff14}
+.pay p{font-size:14px;opacity:.85;margin:12px 0 0}
+.pay .lines{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:12px}
+.pay .lines svg{width:100%;height:auto;background:#0005;border-radius:6px}
+.big{position:fixed;inset:0;display:none;place-items:center;background:#000a;z-index:9;text-align:center}
+.big.on{display:grid}
+.big div{font:400 clamp(40px,13vw,72px)/1 Rye,Georgia,serif;color:var(--gold);text-shadow:0 4px 0 var(--gold2),0 0 30px #ffcc55}
+.big b{display:block;margin-top:12px;font:800 clamp(30px,10vw,48px)/1 Archivo,sans-serif;color:#fff;font-variant-numeric:tabular-nums}
+.big small{display:block;margin-top:18px;font-size:15px;opacity:.8;color:#fff}
+@media(prefers-reduced-motion:reduce){.bulbs i,.cell.hit svg{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="marquee"><h1>Bright Slots</h1><p>Doar credite de joc, fără bani reali</p></header>
+  <main class="cab" id="cab">
+    <div class="stats">
+      <div class="stat"><small>Credite</small><b id="credits">1000</b></div>
+      <div class="stat"><small>Câștig</small><b id="last">0</b></div>
+      <div class="stat"><small>Linii</small><b>10</b></div>
+    </div>
+    <div class="window">
+      <div class="bulbs" id="bulbs" aria-hidden="true"></div>
+      <div class="reels" id="reels"><svg id="lines" aria-hidden="true"></svg></div>
+    </div>
+    <div class="fsbar" id="fsbar">ROTIRI GRATUITE</div>
+    <div class="msg lose" id="msg" aria-live="polite">Apasă ÎNVÂRTE ca să începi</div>
+    <div class="controls">
+      <div class="bet">
+        <button class="sm" id="minus" aria-label="Scade miza">−</button>
+        <span><small>Miză</small><b id="bet">10</b></span>
+        <button class="sm" id="plus" aria-label="Crește miza">+</button>
+      </div>
+      <button class="spin" id="spin">ÎNVÂRTE</button>
+    </div>
+    <div class="row2">
+      <button id="auto" aria-pressed="false">Auto</button>
+      <button id="turbo" aria-pressed="false">Rapid</button>
+      <button id="sound" aria-pressed="true">Sunet</button>
+      <button id="reset">Reumple</button>
+    </div>
+  </main>
+  <section class="pay">
+    <h2>Tabel câștiguri</h2>
+    <table><thead><tr><th>Simbol</th><th>×3</th><th>×4</th><th>×5</th></tr></thead><tbody id="paytb"></tbody></table>
+    <p><b>WILD</b> înlocuiește orice simbol, mai puțin BONUS. <b>BONUS</b> oriunde pe ecran: 3 dau 10 rotiri gratuite, 4 dau 15, 5 dau 20, plus miza totală ×2 / ×10 / ×50. În rotirile gratuite toate câștigurile se dublează și le poți reactiva.</p>
+    <p>Câștigurile pe linie se plătesc de la stânga la dreapta, ca multiplicator al mizei pe linie (miza totală / 10). Pe fiecare linie se plătește doar combinația cea mai mare.</p>
+    <div class="lines" id="linepics"></div>
+  </section>
+</div>
+<div class="big" id="big"><div><span id="bigT">BIG WIN</span><b id="bigN">0</b><small>Atinge ca să continui</small></div></div>
+<script>
+{
+/* ===== ENGINE START ===== */
+const SYM = [
+  {id:'cherry', w:24, pay:[5,20,60],    name:'Cireșe'},
+  {id:'lemon',  w:24, pay:[5,20,60],    name:'Lămâie'},
+  {id:'plum',   w:20, pay:[8,30,100],    name:'Prună'},
+  {id:'bell',   w:14, pay:[12,50,150],  name:'Clopoțel'},
+  {id:'bar',    w:10, pay:[20,75,250],  name:'BAR'},
+  {id:'seven',  w:6,  pay:[25,100,400], name:'Șeptar'},
+  {id:'diamond',w:4,  pay:[50,200,1000],name:'Diamant'},
+  {id:'wild',   w:4,  pay:[50,250,2000],name:'WILD'},
+  {id:'scatter',w:3.4, pay:null,         name:'BONUS'}
+];
+const BY = Object.fromEntries(SYM.map(s=>[s.id,s]));
+const TOTAL = SYM.reduce((a,s)=>a+s.w,0);
+const LINES = [[1,1,1,1,1],[0,0,0,0,0],[2,2,2,2,2],[0,1,2,1,0],[2,1,0,1,2],[0,0,1,2,2],[2,2,1,0,0],[1,0,0,0,1],[1,2,2,2,1],[1,0,1,2,1]];
+const LINE_COL = ['#ffd54f','#ff7043','#4fc3f7','#81c784','#ba68c8','#f06292','#4dd0e1','#ffb74d','#aed581','#9575cd'];
+const FS = {3:[10,2],4:[15,10],5:[20,50]};   // scatters: [free spins, total-bet multiplier]
+const rnd = () => { let r = Math.random()*TOTAL; for (const s of SYM) { if ((r -= s.w) < 0) return s.id; } return 'cherry'; };
+const grid = () => [0,1,2,3,4].map(() => [rnd(),rnd(),rnd()]);
+function evalLine(syms){
+  // best of: wild-only run, or run of first non-wild symbol (wilds substitute)
+  let best = {mult:0,n:0,sym:null};
+  let wn = 0; while (wn<5 && syms[wn]==='wild') wn++;
+  if (wn>=3) best = {mult:BY.wild.pay[wn-3], n:wn, sym:'wild'};
+  const t = syms.find(s => s!=='wild');
+  if (t && t!=='scatter'){
+    let n = 0; while (n<5 && (syms[n]===t || syms[n]==='wild')) n++;
+    if (n>=3 && BY[t].pay[n-3] > best.mult) best = {mult:BY[t].pay[n-3], n, sym:t};
+  }
+  return best;
+}
+function evaluate(g, lineBet, mult){
+  const wins = []; let total = 0;
+  LINES.forEach((ln,i) => {
+    const r = evalLine(ln.map((row,reel) => g[reel][row]));
+    if (r.mult){ const amt = r.mult*lineBet*mult; total += amt; wins.push({line:i, n:r.n, sym:r.sym, amt}); }
+  });
+  const scat = []; g.forEach((col,reel) => col.forEach((s,row) => { if (s==='scatter') scat.push([reel,row]); }));
+  let free = 0;
+  if (scat.length>=3){ const k = Math.min(5,scat.length); free = FS[k][0]; const amt = FS[k][1]*lineBet*10*mult; total += amt; wins.push({scatter:scat, amt, n:scat.length}); }
+  return {total, wins, free};
+}
+/* ===== ENGINE END ===== */
+
+const SV = {
+  cherry:'<path d="M22 40c4-14 12-24 24-30" stroke="#2e7d32" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M42 42c0-14 2-24 4-32" stroke="#2e7d32" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M46 10c8-2 12 2 12 6-6 2-10 0-12-6z" fill="#43a047"/><circle cx="20" cy="46" r="13" fill="#d32f2f"/><circle cx="42" cy="48" r="13" fill="#c62828"/><circle cx="15" cy="41" r="4" fill="#fff8"/><circle cx="37" cy="43" r="4" fill="#fff8"/>',
+  lemon:'<ellipse cx="32" cy="34" rx="24" ry="18" fill="#fbc02d"/><path d="M8 34c-4-2-4 2 0 2M56 34c4-2 4 2 0 2" stroke="#f9a825" stroke-width="4"/><ellipse cx="24" cy="28" rx="8" ry="4" fill="#fff6"/><path d="M30 16c2-6 8-8 12-6-2 4-6 6-12 6z" fill="#43a047"/>',
+  plum:'<circle cx="32" cy="36" r="21" fill="#6a1b9a"/><path d="M32 16c0 10-3 30 0 41" stroke="#4a148c" stroke-width="2" fill="none"/><ellipse cx="24" cy="28" rx="6" ry="4" fill="#fff5"/><path d="M32 16c4-8 12-10 16-8-4 6-10 8-16 8z" fill="#43a047"/>',
+  bell:'<path d="M32 8c-12 0-18 10-18 22v10l-6 8h48l-6-8V30c0-12-6-22-18-22z" fill="#ffb300"/><path d="M8 48h48v4H8z" fill="#e69500"/><circle cx="32" cy="56" r="5" fill="#e69500"/><path d="M22 22c2-6 6-8 10-8" stroke="#fff9" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="32" cy="7" r="3" fill="#e69500"/>',
+  bar:'<rect x="4" y="20" width="56" height="24" rx="5" fill="#212121"/><rect x="7" y="23" width="50" height="18" rx="3" fill="none" stroke="#f2c14e" stroke-width="2"/><text x="32" y="39" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="16" fill="#f2c14e">BAR</text>',
+  seven:'<path d="M12 10h40v9L32 56H20l20-36H12z" fill="#d32f2f" stroke="#7f0000" stroke-width="3" stroke-linejoin="round"/><path d="M16 14h30" stroke="#fff7" stroke-width="3" stroke-linecap="round"/>',
+  diamond:'<path d="M14 22l10-12h16l10 12-18 32z" fill="#4fc3f7"/><path d="M14 22h36L32 54z" fill="#0288d1"/><path d="M24 10l-4 12 12 32 12-32-4-12" fill="none" stroke="#e1f5fe" stroke-width="1.5"/><path d="M20 14l4-4" stroke="#fff" stroke-width="3" stroke-linecap="round"/>',
+  wild:'<rect x="3" y="3" width="58" height="58" rx="12" fill="#1b5e20"/><rect x="6" y="6" width="52" height="52" rx="9" fill="none" stroke="#f2c14e" stroke-width="2"/><path d="M32 9l5.5 11.5 12.5 1.7-9.1 8.8 2.2 12.5L32 37.6 20.9 43.5l2.2-12.5L14 22.2l12.5-1.7z" fill="#f2c14e"/><text x="32" y="56" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="13" fill="#fff">WILD</text>',
+  scatter:'<circle cx="32" cy="32" r="28" fill="#7b2ff7"/><circle cx="32" cy="32" r="23" fill="none" stroke="#e3d0ff" stroke-width="2" stroke-dasharray="4 3"/><circle cx="32" cy="32" r="18" fill="#9b5cff"/><text x="32" y="37" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="13" fill="#fff">BONUS</text><path d="M18 18a20 20 0 0 1 10-6" stroke="#fff9" stroke-width="3" fill="none" stroke-linecap="round"/>'
+};
+const svg = id => `<svg viewBox="0 0 64 64" aria-hidden="true">${SV[id]}</svg>`;
+const cellsHTML = col => col.map(id => `<div class="cell">${svg(id)}</div>`).join('');
+const $ = id => document.getElementById(id);
+const BETS = [10,20,50,100,200,500];
+
+let st = {credits:1000, bet:10, sound:true, turbo:false};
+try { Object.assign(st, JSON.parse(localStorage.getItem('brightSlots5')||'{}')); } catch(e){}
+if (!BETS.includes(st.bet)) st.bet = 10;
+const save = () => { try { localStorage.setItem('brightSlots5', JSON.stringify(st)); } catch(e){} };
+
+let spinning = false, auto = false, actx = null, fs = 0, fsTotal = 0, fsWin = 0, fsBet = 10, showTimer = null, bigResolve = null;
+const reelsEl = $('reels'), linesEl = $('lines');
+const reels = [0,1,2,3,4].map(() => {
+  const r = document.createElement('div'); r.className = 'reel';
+  const s = document.createElement('div'); s.className = 'strip'; r.appendChild(s);
+  reelsEl.insertBefore(r, linesEl);
+  const vis = [rnd(),rnd(),rnd()].map(x => x==='scatter'?'cherry':x);
+  s.innerHTML = cellsHTML(vis);
+  return {el:r, strip:s, vis};
+});
+
+{ const b = $('bulbs'); let h = '';
+  for (let i=0;i<11;i++){ const p=i*10; h+=`<i style="left:calc(${p}% - 4px);top:0"></i><i style="left:calc(${p}% - 4px);bottom:0"></i>`; }
+  for (let i=1;i<4;i++){ const p=i*25; h+=`<i style="top:calc(${p}% - 4px);left:0"></i><i style="top:calc(${p}% - 4px);right:0"></i>`; }
+  b.innerHTML = h; }
+
+$('paytb').innerHTML = SYM.filter(s=>s.pay).reverse().map(s =>
+  `<tr><td>${svg(s.id)}${s.name}</td>${s.pay.map(p=>`<td>${p}</td>`).join('')}</tr>`).join('');
+$('linepics').innerHTML = LINES.map((ln,i) => {
+  let c = ''; for (let x=0;x<5;x++) for (let y=0;y<3;y++) c += `<rect x="${x*12+1}" y="${y*12+1}" width="10" height="10" rx="2" fill="${ln[x]===y?LINE_COL[i]:'#ffffff22'}"/>`;
+  return `<svg viewBox="0 0 60 36" aria-label="Linia ${i+1}">${c}</svg>`;
+}).join('');
+
+function beep(f, d, type='square', vol=.05, delay=0){
+  if (!st.sound) return;
+  try {
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + delay;
+    o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, t);
+    o.connect(g); g.connect(actx.destination);
+    g.gain.exponentialRampToValueAtTime(.0001, t+d); o.start(t); o.stop(t+d);
+  } catch(e){}
+}
+const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch(e){} };
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+function render(){
+  $('credits').textContent = st.credits;
+  $('bet').textContent = fs ? fsBet : st.bet;
+  $('sound').setAttribute('aria-pressed', st.sound);
+  $('turbo').setAttribute('aria-pressed', st.turbo);
+  $('spin').disabled = spinning || (!fs && st.credits < st.bet);
+  $('spin').textContent = fs ? `GRATUIT (${fs})` : 'ÎNVÂRTE';
+  $('cab').classList.toggle('fs', fs>0);
+  $('fsbar').textContent = `ROTIRI GRATUITE ${fsTotal-fs}/${fsTotal} · câștiguri ×2 · total ${fsWin}`;
+}
+function msg(t, win){ const m=$('msg'); m.textContent=t; m.className='msg'+(win?'':' lose'); }
+
+function clearShow(){
+  clearTimeout(showTimer); showTimer = null; linesEl.innerHTML = '';
+  document.querySelectorAll('.cell.hit,.cell.dim').forEach(c => c.classList.remove('hit','dim'));
+  $('cab').classList.remove('win');
+}
+function cellAt(reel,row){ return reels[reel].strip.children[row]; }
+function linePath(i){
+  const h = reels[0].el.offsetHeight/3, pts = LINES[i].map((row,reel) => {
+    const e = reels[reel].el; return `${e.offsetLeft + e.offsetWidth/2},${e.offsetTop + row*h + h/2}`; });
+  const e0 = reels[0].el, e4 = reels[4].el, y0 = e0.offsetTop + LINES[i][0]*h + h/2, y4 = e4.offsetTop + LINES[i][4]*h + h/2;
+  return `${e0.offsetLeft-4},${y0} ${pts.join(' ')} ${e4.offsetLeft+e4.offsetWidth+4},${y4}`;
+}
+function highlight(w){
+  linesEl.innerHTML = '';
+  document.querySelectorAll('.cell').forEach(c => { c.classList.remove('hit'); c.classList.add('dim'); });
+  let cells;
+  if (w.scatter) cells = w.scatter;
+  else {
+    cells = LINES[w.line].slice(0,w.n).map((row,reel) => [reel,row]);
+    linesEl.innerHTML = `<polyline points="${linePath(w.line)}" fill="none" stroke="#0008" stroke-width="7" stroke-linejoin="round"/><polyline points="${linePath(w.line)}" fill="none" stroke="${LINE_COL[w.line]}" stroke-width="4" stroke-linejoin="round"/>`;
+  }
+  cells.forEach(([r,c]) => { const e = cellAt(r,c); e.classList.remove('dim'); e.classList.add('hit'); });
+}
+function showWins(wins){
+  if (!wins.length) return;
+  $('cab').classList.add('win');
+  let k = 0;
+  const step = () => {
+    const w = wins[k % wins.length];
+    highlight(w);
+    msg(w.scatter ? `${w.n} × BONUS  +${w.amt}` : `Linia ${w.line+1}: ${w.n} × ${BY[w.sym].name}  +${w.amt}`, true);
+    k++; if (wins.length > 1) showTimer = setTimeout(step, 1300);
+  };
+  step();
+}
+
+function spinReel(r, i, final, quick){
+  return new Promise(res => {
+    const n = (quick ? 6 : 14) + i*(quick ? 2 : 5), mid = [];
+    for (let k=0;k<n;k++) mid.push(rnd());
+    const all = [...final, ...mid, ...r.vis];
+    r.strip.style.transition = 'none';
+    r.strip.innerHTML = cellsHTML(all);
+    const h = r.el.offsetHeight/3, dist = (all.length-3)*h;
+    r.strip.style.transform = `translateY(${-dist}px)`;
+    r.strip.offsetHeight;
+    const dur = quick ? .45 + i*.12 : .9 + i*.3;
+    r.strip.style.transition = `transform ${dur}s cubic-bezier(.2,.75,.25,1.04)`;
+    r.strip.style.transform = 'translateY(0)';
+    let ticks = 0; const tk = setInterval(() => { if (++ticks > dur*12) clearInterval(tk); else beep(200+i*35,.025,'square',.015); }, 85);
+    setTimeout(() => {
+      clearInterval(tk);
+      r.strip.style.transition = 'none';
+      r.strip.innerHTML = cellsHTML(final);
+      r.strip.style.transform = 'translateY(0)';
+      r.vis = final;
+      const sc = final.includes('scatter');
+      beep(sc ? 660 : 140, sc ? .18 : .07, sc ? 'sine' : 'triangle', sc ? .08 : .07); buzz(sc ? 40 : 12);
+      res();
+    }, dur*1000 + 40);
+  });
+}
+
+function bigWin(title, amount){
+  return new Promise(res => {
+    $('bigT').textContent = title; $('big').classList.add('on'); bigResolve = res;
+    let v = 0; const end = amount, t0 = performance.now();
+    const tick = now => { const p = Math.min(1,(now-t0)/1500); v = Math.round(end*p); $('bigN').textContent = v; if (p<1 && bigResolve) requestAnimationFrame(tick); else $('bigN').textContent = end; };
+    requestAnimationFrame(tick);
+    [523,659,784,1046,1318].forEach((f,k) => beep(f,.22,'square',.06,k*.12));
+    buzz([90,60,90,60,250]);
+  });
+}
+$('big').addEventListener('click', () => { $('big').classList.remove('on'); if (bigResolve){ const r = bigResolve; bigResolve = null; r(); } });
+
+async function spin(){
+  if (spinning) return;
+  const free = fs > 0;
+  if (!free && st.credits < st.bet) return;
+  spinning = true; clearShow();
+  const bet = free ? fsBet : st.bet, lineBet = bet/10, mult = free ? 2 : 1;
+  if (free) fs--; else st.credits -= bet;
+  $('last').textContent = 0; render(); save();
+  msg(free ? 'Rotire gratuită…' : 'Se învârte…', false);
+  const g = grid();
+  const quick = st.turbo || free;
+  await Promise.all(reels.map((r,i) => spinReel(r,i,g[i],quick)));
+  const res = evaluate(g, lineBet, mult);
+  st.credits += res.total; if (free) fsWin += res.total;
+  $('last').textContent = res.total;
+  render();
+  if (res.total){
+    [523,659,784].forEach((f,k) => beep(f,.14,'square',.05,k*.1)); buzz([50,40,50]);
+    if (res.total >= bet*20) { highlight(res.wins[0]); await bigWin(res.total >= bet*50 ? 'MEGA WIN' : 'BIG WIN', res.total); }
+    showWins(res.wins);
+  } else msg(free ? 'Nimic la rotirea asta' : (st.credits < st.bet ? 'Credite epuizate. Apasă Reumple.' : 'Nimic de data asta. Mai încearcă!'), false);
+
+  if (res.free){
+    if (!free && !fs) { fsBet = bet; fsTotal = 0; fsWin = 0; }
+    fs += res.free; fsTotal += res.free;
+    await wait(900);
+    await bigWin(free ? `+${res.free} ROTIRI` : `${res.free} ROTIRI GRATUITE`, res.free);
+  }
+  spinning = false; save(); render();
+  if (fs > 0) { setTimeout(spin, res.total ? 1500 : 700); return; }
+  if (free && fs === 0) { await wait(res.total ? 1400 : 500); clearShow(); await bigWin('TOTAL ROTIRI GRATUITE', fsWin); fsTotal = 0; render(); msg(`Ai câștigat ${fsWin} în rotirile gratuite`, true); }
+  if (auto && st.credits >= st.bet) setTimeout(spin, res.total ? 1600 : 500);
+  else if (auto) { auto = false; $('auto').setAttribute('aria-pressed', false); }
+}
+
+$('spin').addEventListener('click', spin);
+const setBet = d => { if (spinning || fs) return; const i = BETS.indexOf(st.bet); st.bet = BETS[Math.max(0,Math.min(BETS.length-1,i+d))]; beep(d>0?440:330,.05); render(); save(); };
+$('minus').addEventListener('click', () => setBet(-1));
+$('plus').addEventListener('click', () => setBet(1));
+$('auto').addEventListener('click', () => { auto = !auto; $('auto').setAttribute('aria-pressed', auto); if (auto && !spinning) spin(); });
+$('turbo').addEventListener('click', () => { st.turbo = !st.turbo; render(); save(); });
+$('sound').addEventListener('click', () => { st.sound = !st.sound; render(); save(); });
+$('reset').addEventListener('click', () => { if (spinning || fs) return; st.credits = 1000; clearShow(); $('last').textContent = 0; msg('Ai din nou 1000 de credite', true); render(); save(); });
+document.addEventListener('keydown', e => { if (e.code === 'Space' && e.target.tagName !== 'BUTTON') { e.preventDefault(); spin(); } });
+render();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "appId": "com.brightmetalwork.slots",
+  "appName": "Bright Slots",
+  "webDir": "www",
+  "backgroundColor": "#5b0f1a",
+  "android": { "backgroundColor": "#5b0f1a" }
+}
