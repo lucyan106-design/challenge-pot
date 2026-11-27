@@ -47,9 +47,10 @@ body{margin:0;min-height:100vh;background:radial-gradient(120% 80% at 50% 0%,lig
 .cab.fs .fsbar{display:block}
 .msg{min-height:52px;margin:12px 0 6px;text-align:center;font-weight:800;font-size:clamp(18px,5.4vw,22px);color:var(--gold);line-height:1.2;display:grid;place-items:center}
 .msg.lose{color:var(--txt);opacity:.75;font-weight:500;font-size:16px}
-.controls{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center}
-.bet{display:flex;align-items:center;gap:4px;background:#0006;border-radius:14px;padding:6px;box-shadow:inset 0 0 0 1px #f2c14e55}
-.bet span{min-width:56px;text-align:center}
+.controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:center}
+.controls .spin{grid-column:1/-1}
+.bet{display:flex;align-items:center;justify-content:space-between;gap:4px;background:#0006;border-radius:14px;padding:6px;box-shadow:inset 0 0 0 1px #f2c14e55}
+.bet span{min-width:0;flex:1;text-align:center}
 .bet span small{display:block;font-size:13px;opacity:.75;line-height:1}
 .bet span b{font-size:20px;font-variant-numeric:tabular-nums}
 button{font:inherit;cursor:pointer;border:0;border-radius:12px;min-height:44px}
@@ -73,7 +74,8 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
 .pay tr+tr td{border-top:1px solid #ffffff14}
 .pay p{font-size:14px;opacity:.85;margin:12px 0 0}
 .pay .lines{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:12px}
-.pay .lines svg{width:100%;height:auto;background:#0005;border-radius:6px}
+.pay .lines svg{width:100%;height:auto;background:#0005;border-radius:6px;transition:opacity .2s}
+.pay .lines svg.off{opacity:.25}
 .big{position:fixed;inset:0;display:none;place-items:center;background:#000a;z-index:9;text-align:center}
 .big.on{display:grid}
 .big div{font:400 clamp(40px,13vw,72px)/1 Rye,Georgia,serif;color:var(--gold);text-shadow:0 4px 0 var(--gold2),0 0 30px #ffcc55}
@@ -89,7 +91,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
     <div class="stats">
       <div class="stat"><small>Credite</small><b id="credits">1000</b></div>
       <div class="stat"><small>Câștig</small><b id="last">0</b></div>
-      <div class="stat"><small>Linii</small><b>10</b></div>
+      <div class="stat"><small>Miză totală</small><b id="total">10</b></div>
     </div>
     <div class="window">
       <div class="bulbs" id="bulbs" aria-hidden="true"></div>
@@ -99,9 +101,14 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
     <div class="msg lose" id="msg" aria-live="polite">Apasă ÎNVÂRTE ca să începi</div>
     <div class="controls">
       <div class="bet">
-        <button class="sm" id="minus" aria-label="Scade miza">−</button>
-        <span><small>Miză</small><b id="bet">10</b></span>
-        <button class="sm" id="plus" aria-label="Crește miza">+</button>
+        <button class="sm" id="lminus" aria-label="Mai puține linii">−</button>
+        <span><small>Linii</small><b id="nlines">10</b></span>
+        <button class="sm" id="lplus" aria-label="Mai multe linii">+</button>
+      </div>
+      <div class="bet">
+        <button class="sm" id="minus" aria-label="Scade miza pe linie">−</button>
+        <span><small>Pe linie</small><b id="bet">1</b></span>
+        <button class="sm" id="plus" aria-label="Crește miza pe linie">+</button>
       </div>
       <button class="spin" id="spin">ÎNVÂRTE</button>
     </div>
@@ -116,7 +123,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
     <h2>Tabel câștiguri</h2>
     <table><thead><tr><th>Simbol</th><th>×3</th><th>×4</th><th>×5</th></tr></thead><tbody id="paytb"></tbody></table>
     <p><b>WILD</b> înlocuiește orice simbol, mai puțin BONUS. <b>BONUS</b> oriunde pe ecran: 3 dau 10 rotiri gratuite, 4 dau 15, 5 dau 20, plus miza totală ×2 / ×10 / ×50. În rotirile gratuite toate câștigurile se dublează și le poți reactiva.</p>
-    <p>Câștigurile pe linie se plătesc de la stânga la dreapta, ca multiplicator al mizei pe linie (miza totală / 10). Pe fiecare linie se plătește doar combinația cea mai mare.</p>
+    <p>Alegi câte linii joci (1–10) și miza pe linie. Miza totală e linii × miză pe linie. Câștigurile se plătesc doar pe liniile active, de la stânga la dreapta, ca multiplicator al mizei pe linie. Pe fiecare linie se plătește doar combinația cea mai mare. BONUS plătește oricum, indiferent de linii.</p>
     <div class="lines" id="linepics"></div>
   </section>
 </div>
@@ -154,15 +161,15 @@ function evalLine(syms){
   }
   return best;
 }
-function evaluate(g, lineBet, mult){
+function evaluate(g, lineBet, mult, nLines=10){
   const wins = []; let total = 0;
-  LINES.forEach((ln,i) => {
+  LINES.slice(0,nLines).forEach((ln,i) => {
     const r = evalLine(ln.map((row,reel) => g[reel][row]));
     if (r.mult){ const amt = r.mult*lineBet*mult; total += amt; wins.push({line:i, n:r.n, sym:r.sym, amt}); }
   });
   const scat = []; g.forEach((col,reel) => col.forEach((s,row) => { if (s==='scatter') scat.push([reel,row]); }));
   let free = 0;
-  if (scat.length>=3){ const k = Math.min(5,scat.length); free = FS[k][0]; const amt = FS[k][1]*lineBet*10*mult; total += amt; wins.push({scatter:scat, amt, n:scat.length}); }
+  if (scat.length>=3){ const k = Math.min(5,scat.length); free = FS[k][0]; const amt = FS[k][1]*lineBet*nLines*mult; total += amt; wins.push({scatter:scat, amt, n:scat.length}); }
   return {total, wins, free};
 }
 /* ===== ENGINE END ===== */
@@ -181,14 +188,17 @@ const SV = {
 const svg = id => `<svg viewBox="0 0 64 64" aria-hidden="true">${SV[id]}</svg>`;
 const cellsHTML = col => col.map(id => `<div class="cell">${svg(id)}</div>`).join('');
 const $ = id => document.getElementById(id);
-const BETS = [10,20,50,100,200,500];
+const LBETS = [1,2,5,10,20,50];
 
-let st = {credits:1000, bet:10, sound:true, turbo:false};
+let st = {credits:1000, lineBet:1, lines:10, sound:true, turbo:false};
 try { Object.assign(st, JSON.parse(localStorage.getItem('brightSlots5')||'{}')); } catch(e){}
-if (!BETS.includes(st.bet)) st.bet = 10;
+delete st.bet;
+if (!LBETS.includes(st.lineBet)) st.lineBet = 1;
+if (!(st.lines>=1 && st.lines<=10)) st.lines = 10;
+const tb = () => st.lineBet*st.lines;
 const save = () => { try { localStorage.setItem('brightSlots5', JSON.stringify(st)); } catch(e){} };
 
-let spinning = false, auto = false, actx = null, fs = 0, fsTotal = 0, fsWin = 0, fsBet = 10, showTimer = null, bigResolve = null;
+let spinning = false, auto = false, actx = null, fs = 0, fsTotal = 0, fsWin = 0, fsLB = 1, fsLines = 10, showTimer = null, bigResolve = null;
 const reelsEl = $('reels'), linesEl = $('lines');
 const reels = [0,1,2,3,4].map(() => {
   const r = document.createElement('div'); r.className = 'reel';
@@ -227,10 +237,13 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
 function render(){
   $('credits').textContent = st.credits;
-  $('bet').textContent = fs ? fsBet : st.bet;
+  const lb = fs ? fsLB : st.lineBet, nl = fs ? fsLines : st.lines;
+  $('bet').textContent = lb; $('nlines').textContent = nl; $('total').textContent = lb*nl;
+  document.querySelectorAll('#linepics svg').forEach((e,i) => e.classList.toggle('off', i >= nl));
+  ['minus','plus','lminus','lplus'].forEach(id => $(id).disabled = spinning || fs>0);
   $('sound').setAttribute('aria-pressed', st.sound);
   $('turbo').setAttribute('aria-pressed', st.turbo);
-  $('spin').disabled = spinning || (!fs && st.credits < st.bet);
+  $('spin').disabled = spinning || (!fs && st.credits < tb());
   $('spin').textContent = fs ? `GRATUIT (${fs})` : 'ÎNVÂRTE';
   $('cab').classList.toggle('fs', fs>0);
   $('fsbar').textContent = `ROTIRI GRATUITE ${fsTotal-fs}/${fsTotal} · câștiguri ×2 · total ${fsWin}`;
@@ -315,16 +328,16 @@ $('big').addEventListener('click', () => { $('big').classList.remove('on'); if (
 async function spin(){
   if (spinning) return;
   const free = fs > 0;
-  if (!free && st.credits < st.bet) return;
+  if (!free && st.credits < tb()) return;
   spinning = true; clearShow();
-  const bet = free ? fsBet : st.bet, lineBet = bet/10, mult = free ? 2 : 1;
+  const lineBet = free ? fsLB : st.lineBet, nLines = free ? fsLines : st.lines, bet = lineBet*nLines, mult = free ? 2 : 1;
   if (free) fs--; else st.credits -= bet;
   $('last').textContent = 0; render(); save();
   msg(free ? 'Rotire gratuită…' : 'Se învârte…', false);
   const g = grid();
   const quick = st.turbo || free;
   await Promise.all(reels.map((r,i) => spinReel(r,i,g[i],quick)));
-  const res = evaluate(g, lineBet, mult);
+  const res = evaluate(g, lineBet, mult, nLines);
   st.credits += res.total; if (free) fsWin += res.total;
   $('last').textContent = res.total;
   render();
@@ -332,10 +345,10 @@ async function spin(){
     [523,659,784].forEach((f,k) => beep(f,.14,'square',.05,k*.1)); buzz([50,40,50]);
     if (res.total >= bet*20) { highlight(res.wins[0]); await bigWin(res.total >= bet*50 ? 'MEGA WIN' : 'BIG WIN', res.total); }
     showWins(res.wins);
-  } else msg(free ? 'Nimic la rotirea asta' : (st.credits < st.bet ? 'Credite epuizate. Apasă Reumple.' : 'Nimic de data asta. Mai încearcă!'), false);
+  } else msg(free ? 'Nimic la rotirea asta' : (st.credits < tb() ? 'Credite epuizate. Apasă Reumple.' : 'Nimic de data asta. Mai încearcă!'), false);
 
   if (res.free){
-    if (!free && !fs) { fsBet = bet; fsTotal = 0; fsWin = 0; }
+    if (!free && !fs) { fsLB = lineBet; fsLines = nLines; fsTotal = 0; fsWin = 0; }
     fs += res.free; fsTotal += res.free;
     await wait(900);
     await bigWin(free ? `+${res.free} ROTIRI` : `${res.free} ROTIRI GRATUITE`, res.free);
@@ -343,12 +356,21 @@ async function spin(){
   spinning = false; save(); render();
   if (fs > 0) { setTimeout(spin, res.total ? 1500 : 700); return; }
   if (free && fs === 0) { await wait(res.total ? 1400 : 500); clearShow(); await bigWin('TOTAL ROTIRI GRATUITE', fsWin); fsTotal = 0; render(); msg(`Ai câștigat ${fsWin} în rotirile gratuite`, true); }
-  if (auto && st.credits >= st.bet) setTimeout(spin, res.total ? 1600 : 500);
+  if (auto && st.credits >= tb()) setTimeout(spin, res.total ? 1600 : 500);
   else if (auto) { auto = false; $('auto').setAttribute('aria-pressed', false); }
 }
 
 $('spin').addEventListener('click', spin);
-const setBet = d => { if (spinning || fs) return; const i = BETS.indexOf(st.bet); st.bet = BETS[Math.max(0,Math.min(BETS.length-1,i+d))]; beep(d>0?440:330,.05); render(); save(); };
+const setBet = d => { if (spinning || fs) return; const i = LBETS.indexOf(st.lineBet); st.lineBet = LBETS[Math.max(0,Math.min(LBETS.length-1,i+d))]; beep(d>0?440:330,.05); render(); save(); };
+let previewT = null;
+function previewLines(){
+  clearShow();
+  linesEl.innerHTML = LINES.slice(0,st.lines).map((ln,i) => `<polyline points="${linePath(i)}" fill="none" stroke="${LINE_COL[i]}" stroke-width="3" stroke-linejoin="round" opacity=".9"/>`).join('');
+  clearTimeout(previewT); previewT = setTimeout(() => { if (!spinning) linesEl.innerHTML = ''; }, 1400);
+}
+const setLines = d => { if (spinning || fs) return; st.lines = Math.max(1, Math.min(10, st.lines + d)); beep(d>0?520:390,.05); render(); save(); previewLines(); msg(`Joci pe ${st.lines} ${st.lines===1?'linie':'linii'}`, true); };
+$('lminus').addEventListener('click', () => setLines(-1));
+$('lplus').addEventListener('click', () => setLines(1));
 $('minus').addEventListener('click', () => setBet(-1));
 $('plus').addEventListener('click', () => setBet(1));
 $('auto').addEventListener('click', () => { auto = !auto; $('auto').setAttribute('aria-pressed', auto); if (auto && !spinning) spin(); });
