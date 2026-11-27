@@ -149,9 +149,10 @@ const SYM = [
   {id:'scatter',w:3.4, pay:null,         name:'BONUS'}
 ];
 const BY = Object.fromEntries(SYM.map(s=>[s.id,s]));
-// Luck by bet: smaller bet per line = more WILDs = higher payout rate
-const WILD_W = {1:5.8, 2:5.3, 5:4.8, 10:4.3, 20:3.9, 50:3.5};
-const weightsFor = lb => SYM.map(s => s.id==='wild' ? (WILD_W[lb] ?? 4) : s.w);
+// Luck by bet: smaller bet per line = more WILDs and diamonds = higher payout rate
+const WILD_W = {1:8, 2:7, 5:5.6, 10:4.3, 20:3.9, 50:3.5};
+const DIAM_W = {1:9, 2:7.5, 5:5.5, 10:4, 20:4, 50:4};
+const weightsFor = lb => SYM.map(s => s.id==='wild' ? (WILD_W[lb] ?? 4) : s.id==='diamond' ? (DIAM_W[lb] ?? 4) : s.w);
 const LINES = [[1,1,1,1,1],[0,0,0,0,0],[2,2,2,2,2],[0,1,2,1,0],[2,1,0,1,2],[0,0,1,2,2],[2,2,1,0,0],[1,0,0,0,1],[1,2,2,2,1],[1,0,1,2,1],
   [0,1,1,1,0],[2,1,1,1,2],[0,1,0,1,0],[2,1,2,1,2],[1,1,0,1,1],[1,1,2,1,1],[0,0,2,0,0],[2,2,0,2,2],[0,2,2,2,0],[2,0,0,0,2],
   [1,2,1,0,1],[0,2,0,2,0],[2,0,2,0,2],[1,0,1,0,1],[1,2,1,2,1]];
